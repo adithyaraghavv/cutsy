@@ -11,7 +11,7 @@ Instagram Reels and YouTube Shorts, using signal analysis (and, from Phase 2, Cl
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Ingest, signals, candidates, ffmpeg render (no API cost) | done |
-| 2 | Judge (free backends), trends, QA, report | done except speech captions (waiting on your choice) |
+| 2 | Judge (free backends), trends, captions, QA, report | done |
 | 3 | MCP server, SKILL.md, optional uploader | not started |
 
 ## Requirements
@@ -81,7 +81,11 @@ the pipeline (subclass `Judge` in `judge.py`, register it in `JUDGES`).
 - `out/report.md`: why each clip was picked, signal breakdown, judge score/reason/flags, QA results, API cost
   ($0.00 with the free backends). `--budget-usd` is reserved for paid judges.
 
-Not built yet: captions from speech (waiting on a faster-whisper vs whisper.cpp decision).
+- **Captions** (`--captions`, optional): speech recognition with faster-whisper (free, offline; install it
+  yourself with `pip install faster-whisper`). The model (`base.en`, ~150 MB, set in `config.yaml`) downloads once
+  from Hugging Face into `<cache_dir>/models`. Only the shortlisted candidate windows are transcribed, cached by
+  candidate hash, and the transcript is added to each evidence pack so the judge can read it. Captions are
+  burned in as 2-word chunks with one highlighted key word each, positioned above the Reels/Shorts UI.
 
 ## Tests
 
