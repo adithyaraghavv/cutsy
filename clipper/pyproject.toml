@@ -9,9 +9,12 @@ dependencies = ["numpy"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+mcp = ["mcp"]
+captions = ["faster-whisper"]
 
 [project.scripts]
 clipper = "clipper.cli:main"
+clipper-mcp = "clipper.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68"]
