@@ -11,7 +11,7 @@ Instagram Reels and YouTube Shorts, using signal analysis (and, from Phase 2, Cl
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Ingest, signals, candidates, ffmpeg render (no API cost) | done |
-| 2 | Claude judge, trends, captions, QA, report | not started |
+| 2 | Judge (free backends), trends, QA, report | done except speech captions (waiting on your choice) |
 | 3 | MCP server, SKILL.md, optional uploader | not started |
 
 ## Requirements
@@ -55,6 +55,33 @@ Output in `--out` (default `out/`, git-ignored):
    keep the top 15 non-overlapping. Videos shorter than the window yield one window.
 4. **Render** - blurred background + centered footage for landscape; scale-crop for portrait. A hook
    (Phase 1: chapter/title words; Phase 2: Claude) shows for the first 2.6 s via `drawtext` + `textfile`.
+
+## Phase 2: judge, trends, QA, report (no paid API)
+
+Judging is a swappable backend (`--judge`), so a paid or local model can be added later without touching
+the pipeline (subclass `Judge` in `judge.py`, register it in `JUDGES`).
+
+- `--judge heuristic` (default): offline. Ranks by signals; hooks/hashtags come from `--niche`, trends and the
+  title. It cannot see the video, so risk flags are reported as *not assessed*.
+- `--judge chat`: **Claude in your chat judges, no API key and no per-token cost.** clipper writes
+  `out/evidence/<id>/` (8 frames <=512 px, a contact sheet, signals, transcript slot) and `out/judge_prompt.md`
+  for the top `--shortlist` (default 5) candidates, then stops. Claude writes `out/judgments.json`
+  (score 1-10, reason, best_start/best_end trimmed to 45-60 s inside the window, hook <=6 words, caption,
+  exactly 5 hashtags, risk_flags from spoilers/cutscenes/copyright/profanity). Re-run with
+  `--judgments out/judgments.json`; each entry is validated and bad ones are bounced with a reason.
+  Results are cached by candidate hash, so re-runs never re-ask.
+- **Trends** (all optional, fail soft, never scrape Instagram/TikTok): a hand-edited `trends.json`
+  (`{"keywords": [], "hashtags": [], "niches": {"gta6": {...}}}`, see `trends.example.json`) and the official
+  YouTube Data API (mostPopular + search for `--niche`) when `YOUTUBE_API_KEY` is set. The key is sent in a
+  header, never put in a URL or logged.
+- **QA** after rendering: `--qa heuristic` (default) checks black bars, hook visible and not blank on 4 frames,
+  re-rendering once with `--fill` if bars are found. It cannot judge cropping or whether the subject is visible.
+  `--qa chat` also writes `out/qa/*_sheet.jpg` + `out/qa_prompt.md` for Claude; apply its `qa.json` with
+  `--qa-results out/qa.json` (each failing clip is re-rendered once with the suggested fix).
+- `out/report.md`: why each clip was picked, signal breakdown, judge score/reason/flags, QA results, API cost
+  ($0.00 with the free backends). `--budget-usd` is reserved for paid judges.
+
+Not built yet: captions from speech (waiting on a faster-whisper vs whisper.cpp decision).
 
 ## Tests
 
