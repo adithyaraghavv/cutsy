@@ -51,3 +51,16 @@ def find_bold_font() -> str | None:
         except (OSError, subprocess.SubprocessError):
             pass
     return None
+
+
+def font_family(path: str | None) -> str:
+    """Family name for an ASS style (fc-scan if available, else a sensible guess)."""
+    if path and shutil.which("fc-scan"):
+        try:
+            out = subprocess.run(["fc-scan", "--format", "%{family}", path], capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+            if out:
+                return out.split(",")[0]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return Path(path).stem.replace("-Bold", "").replace("Bold", "") if path else "Arial"

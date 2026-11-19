@@ -15,6 +15,8 @@ DEFAULTS: dict = {
         "loudness_lufs": -14, "hook_seconds": 2.6, "hook_fontsize": 88,
         "hook_wrap_chars": 16, "max_height_download": 1080,
     },
+    "captions": {"model": "base.en", "language": "en", "chunk_words": 2, "fontsize": 96,
+                 "margin_v": 430, "highlight_bgr": "00D7FF"},
     "cache_dir": ".clipper-cache",
 }
 

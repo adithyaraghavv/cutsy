@@ -31,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--qa", default="heuristic", choices=["heuristic", "chat", "none"],
                    help="quality check of rendered clips (chat also writes a pack for Claude to review)")
     p.add_argument("--qa-results", default=None, metavar="FILE", help="qa.json written by Claude; re-renders failing clips once")
+    p.add_argument("--captions", action="store_true",
+                   help="burn in speech captions (2-word chunks, key words highlighted); needs faster-whisper")
     p.add_argument("--config", default=None, help="path to config.yaml")
     p.add_argument("--version", action="version", version=f"clipper {__version__}")
     return p
@@ -51,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         rng = ingest.parse_range(args.rng)
         res = pipeline.run(args.source, n=args.n, window=args.window, rng=rng, fill=args.fill, out=out,
                            cfg=cfg, judge_name=args.judge, judgments=args.judgments, shortlist=args.shortlist,
-                           niche=args.niche, trends_path=args.trends, qa_name=args.qa)
+                           niche=args.niche, trends_path=args.trends, qa_name=args.qa, captions=args.captions)
     except ClipperError as e:
         print(f"clipper: {e}", file=sys.stderr)
         return 2

@@ -5,7 +5,7 @@ import shlex
 from pathlib import Path
 
 from . import candidates as cand
-from . import evidence, ingest, judge as judge_mod, qa as qa_mod, report, signals
+from . import captions as cap_mod, evidence, ingest, judge as judge_mod, qa as qa_mod, report, signals
 from . import trends as trends_mod
 from .errors import ClipperError
 from .render import render_clip
@@ -53,10 +53,15 @@ def _chapter_at(media: ingest.Media, t: float) -> str:
     return ""
 
 
-def _render_one(media, j, out, name, hook, fill, cfg, hook_s):
+def _render_one(media, j, out, name, hook, fill, cfg, hook_s, caption_words=None):
     end = min(j.best_end, media.offset + media.duration)
-    render_clip(media, j.best_start, end, out / name, hook, cfg, fill=fill)
+    render_clip(media, j.best_start, end, out / name, hook, cfg, fill=fill, caption_words=caption_words)
     return end
+
+
+def _words_for(media, it, cfg):
+    key = f"{media.video_id}-{it.hash}-{cfg['captions']['model']}"
+    return cap_mod.transcribe_window(media, it.cand.start_s, it.cand.end_s, cfg, key)
 
 
 def _heuristic_qa(media, clip, c, cfg):
@@ -66,8 +71,10 @@ def _heuristic_qa(media, clip, c, cfg):
 def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: dict,
         judge_name: str = "heuristic", judgments: str | None = None, shortlist: int | None = None,
         niche: str | None = None, trends_path: str | None = None, qa_name: str = "heuristic",
-        log=print) -> dict:
+        captions: bool = False, log=print) -> dict:
     out.mkdir(parents=True, exist_ok=True)
+    if captions:
+        cap_mod.check_available()
     media = ingest.resolve(source, rng, cfg)
     log(f"Source: {media.title or media.source}  ({media.duration:.0f}s, {media.width}x{media.height}"
         f"{'' if media.has_audio else ', no audio'})")
@@ -120,7 +127,8 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
             raise ClipperError("Internal error: judge left candidates unjudged.")
         for it in pending:
             if not (out / "evidence" / it.id / "contact.jpg").is_file():
-                evidence.write_pack(media, [it], out, window)
+                tr = {it.id: cap_mod.transcript_text(_words_for(media, it, cfg))} if captions else None
+                evidence.write_pack(media, [it], out, window, tr)
         resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name)
         prompt = judge_mod.write_prompt(out, pending, ctx, resume)
         for pr in problems:
@@ -140,11 +148,15 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         j = results[it.id]
         name = f"clip_{i}.mp4"
         log(f"[{i}/{len(chosen)}] {j.best_start:.1f}-{j.best_end:.1f}s judge {j.score:g}/10 hook \"{j.hook}\" -> {name}")
-        end = _render_one(media, j, out, name, j.hook, fill, cfg, hook_s)
+        cw = None
+        if captions:
+            cw = cap_mod.slice_words(_words_for(media, it, cfg), j.best_start, j.best_end)
+            log(f"    captions: {len(cw)} words")
+        end = _render_one(media, j, out, name, j.hook, fill, cfg, hook_s, cw)
         c = {"file": name, "id": it.id, "start_s": round(j.best_start, 2), "end_s": round(end, 2),
              "score": round(it.cand.score, 4), "hook": j.hook, "fill": fill,
              "signals": {a: round(b, 3) for a, b in it.cand.breakdown.items()},
-             "judge": j.to_dict(), "qa": [], "rerendered": False}
+             "judge": j.to_dict(), "qa": [], "rerendered": False, "caption_words": cw or []}
         if qa_name != "none":
             q = _heuristic_qa(media, out / name, c, cfg)
             c["qa"].append({**q.to_dict()})
@@ -152,7 +164,7 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
                 log(f"    QA failed {q.checks}; re-rendering once with fix {q.fix}")
                 c["fill"] = q.fix.get("fill", c["fill"])
                 c["hook"] = q.fix.get("hook", c["hook"])
-                _render_one(media, j, out, name, c["hook"], c["fill"], cfg, hook_s)
+                _render_one(media, j, out, name, c["hook"], c["fill"], cfg, hook_s, c["caption_words"] or None)
                 c["rerendered"] = True
                 c["qa"].append(_heuristic_qa(media, out / name, c, cfg).to_dict())
         clips.append(c)
@@ -199,7 +211,7 @@ def apply_qa_results(source: str, *, out: Path, cfg: dict, qa_results: str, log=
             c["fill"] = v.fix.get("fill", c["fill"])
             c["hook"] = v.fix.get("hook", c["hook"])
             j = judge_mod.Judgment(**{**c["judge"], "best_start": c["start_s"], "best_end": c["end_s"]})
-            _render_one(media, j, out, c["file"], c["hook"], c["fill"], cfg, hook_s)
+            _render_one(media, j, out, c["file"], c["hook"], c["fill"], cfg, hook_s, c.get("caption_words") or None)
             c["rerendered"] = True
         elif not v.passed:
             log(f"{c['file']}: Claude QA failed but gave no fix; left as is. Issues: {'; '.join(v.notes)}")

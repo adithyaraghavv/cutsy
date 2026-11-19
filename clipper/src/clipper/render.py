@@ -23,7 +23,7 @@ def _esc_path(p: str) -> str:
     return p.replace(":", r"\:").replace("'", r"\'")
 
 
-def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool) -> str:
+def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool, ass: str | None = None) -> str:
     r = cfg["render"]
     W, H, fps = int(r["width"]), int(r["height"]), int(r["fps"])
     portrait = media.height > media.width
@@ -40,6 +40,10 @@ def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool) -> s
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
         )
     chain += f",fps={fps}"
+    if ass:
+        font = find_bold_font()
+        fd = f":fontsdir='{_esc_path(str(Path(font).parent))}'" if font else ""
+        chain += f",subtitles=filename='{_esc_path(ass)}'{fd}"
     if textfile:
         font = find_bold_font()
         dt = [f"textfile='{_esc_path(textfile)}'"]
@@ -55,7 +59,7 @@ def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool) -> s
 
 
 def render_clip(media: Media, start_abs: float, end_abs: float, out_path: Path, hook: str,
-                cfg: dict, fill: bool = False) -> None:
+                cfg: dict, fill: bool = False, caption_words: list | None = None) -> None:
     ff = shutil.which("ffmpeg")
     if not ff:
         raise ClipperError("ffmpeg was not found on PATH.")
@@ -74,7 +78,13 @@ def render_clip(media: Media, start_abs: float, end_abs: float, out_path: Path, 
             tf = Path(td) / "hook.txt"
             tf.write_text(wrapped, encoding="utf-8")
             textfile = str(tf)
-        fc = build_filter(media, cfg, textfile, fill)
+        ass = None
+        if caption_words:
+            from .captions import build_ass
+            af = Path(td) / "caps.ass"
+            af.write_text(build_ass(caption_words, cfg), encoding="utf-8")
+            ass = str(af)
+        fc = build_filter(media, cfg, textfile, fill, ass)
 
         cmd = [ff, "-y", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(media.path)]
         if not media.has_audio:

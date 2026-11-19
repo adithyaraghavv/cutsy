@@ -71,7 +71,7 @@ def extract_frames(media: Media, c: Candidate, d: Path) -> list[dict]:
     return [{"file": f.name, "t_s": round(c.start_s + i * step, 2)} for i, f in enumerate(frames)]
 
 
-def write_pack(media: Media, items: list[Item], out: Path, window: float) -> Path:
+def write_pack(media: Media, items: list[Item], out: Path, window: float, transcripts: dict | None = None) -> Path:
     root = out / "evidence"
     for it in items:
         d = root / it.id
@@ -86,7 +86,7 @@ def write_pack(media: Media, items: list[Item], out: Path, window: float) -> Pat
             "peak_s": round(it.cand.peak_s, 2), "signal_score": round(it.cand.score, 3),
             "signals_mean_z": {k: round(v, 3) for k, v in it.cand.breakdown.items()},
             "frames": frames, "contact_sheet": "contact.jpg",
-            "transcript": None,   # filled once captions-from-speech exists
+            "transcript": (transcripts or {}).get(it.id),   # speech text when --captions is on
             "video_title": media.title, "chapters_in_window": chapters,
         }, indent=2), encoding="utf-8")
     return root

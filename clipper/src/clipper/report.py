@@ -26,6 +26,8 @@ def write(out: Path, res: dict) -> Path:
               + ("" if j.get("risk_assessed", True) else " (NOT assessed: heuristic judge cannot see the video)"),
               f"- **Signal score:** {c['score']}  |  breakdown (mean z): "
               + ", ".join(f"{k} {v:+.2f}" for k, v in c["signals"].items())]
+        if c.get("caption_words"):
+            L.append(f"- **Captions:** {len(c['caption_words'])} words burned in (2-word chunks, key words highlighted)")
         for q in c.get("qa", []):
             checks = ", ".join(f"{k}={'ok' if v else 'FAIL'}" for k, v in q.get("checks", {}).items())
             L.append(f"- **QA ({q['backend']}):** {'PASS' if q['passed'] else 'FAIL'} {checks} "
