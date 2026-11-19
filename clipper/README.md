@@ -12,7 +12,7 @@ Instagram Reels and YouTube Shorts, using signal analysis (and, from Phase 2, Cl
 |---|---|---|
 | 1 | Ingest, signals, candidates, ffmpeg render (no API cost) | done |
 | 2 | Judge (free backends), trends, captions, QA, report | done |
-| 3 | MCP server, SKILL.md, optional uploader | not started |
+| 3 | MCP server, SKILL.md, setup docs | done (uploader not built, needs your approval) |
 
 ## Requirements
 
@@ -86,6 +86,14 @@ the pipeline (subclass `Judge` in `judge.py`, register it in `JUDGES`).
   from Hugging Face into `<cache_dir>/models`. Only the shortlisted candidate windows are transcribed, cached by
   candidate hash, and the transcript is added to each evidence pack so the judge can read it. Captions are
   burned in as 2-word chunks with one highlighted key word each, positioned above the Reels/Shorts UI.
+
+## Phase 3: use it from Claude (MCP server + skill)
+
+`python -m clipper.mcp_server` (stdio) exposes `start_clip_job`, `job_status`, `list_clips`, `approve_clip`, plus
+`get_evidence` and `submit_judgments` (how Claude in your chat judges candidates without an API key). Jobs run in
+detached background processes and live in `<jobs dir>/<id>/`, so they survive restarts and never block a tool call.
+`approve_clip` only records your approval; nothing is ever uploaded. Setup for Claude Desktop and Claude Code:
+[docs/MCP-SETUP.md](docs/MCP-SETUP.md). The skill is [skill/SKILL.md](skill/SKILL.md).
 
 ## Tests
 
