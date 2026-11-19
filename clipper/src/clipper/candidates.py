@@ -16,6 +16,7 @@ class Candidate:
     end_s: float
     score: float
     breakdown: dict         # signal -> mean z in window
+    peak_s: float = 0.0     # absolute time of the strongest bin in the window
 
 
 def window_scores(c: np.ndarray, wb: int, stride: int, top_frac: float, mean_w: float):
@@ -59,6 +60,7 @@ def pick(sig: Signals, window_s: float, cfg: dict, count: int | None = None) -> 
             end_s=sig.t0 + e * BIN,
             score=float(scores[idx]),
             breakdown={k: float((v[e] - v[s]) / (e - s)) for k, v in cum.items()},
+            peak_s=sig.t0 + (s + int(np.argmax(sig.combined[s:e]))) * BIN,
         ))
         if len(chosen) >= count:
             break
