@@ -1,0 +1,35 @@
+# clipper configuration. Every key is optional; missing keys use built-in defaults.
+
+# Signal weights for the combined per-0.5s score (applied to z-scores).
+# Signals that are unavailable (no heatmap, no chat) are skipped and the
+# remaining weights are renormalised.
+weights:
+  audio_rms: 1.0
+  audio_rise: 1.0
+  motion: 1.0
+  heatmap: 1.5
+  chat: 1.5
+
+candidates:
+  count: 15            # greedy non-overlapping windows kept
+  top_fraction: 0.2    # window score = mean(top 20% of bins) + mean_weight * mean
+  mean_weight: 0.5
+  stride_s: 1.0        # window slide step
+
+signals:
+  rise_lookback_s: 4.0   # "sudden rise" compares RMS to the previous N seconds
+  chat_baseline_s: 30.0  # chat spike = rate minus the previous N seconds' mean
+
+render:
+  width: 1080
+  height: 1920
+  fps: 30
+  crf: 21
+  audio_bitrate: 160k
+  loudness_lufs: -14
+  hook_seconds: 2.6
+  hook_fontsize: 88
+  hook_wrap_chars: 16
+  max_height_download: 1080
+
+cache_dir: .clipper-cache
