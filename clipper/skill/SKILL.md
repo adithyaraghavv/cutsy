@@ -13,7 +13,8 @@ registered and point them to `docs/MCP-SETUP.md`; do not try to emulate it.
 - Only clip streams the user has the streamer's **written permission** to clip. If the link isn't the user's
   own and they haven't said they have permission, ask once before starting.
 - **Never upload anything and never call `approve_clip` unless the user explicitly says to approve that clip.**
-  `approve_clip` only records approval; there is no automatic upload.
+  `approve_clip` only records approval; there is no automatic upload. If the user wants to post, tell them to run
+  `clipper ... --upload` themselves in a terminal (see docs/UPLOADER.md); you cannot upload for them.
 - A live stream that hasn't ended can't be clipped. If the job fails with that message, relay it and stop.
 - Never ask the user to paste API keys or passwords into the chat.
 

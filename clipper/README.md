@@ -12,7 +12,7 @@ Instagram Reels and YouTube Shorts, using signal analysis (and, from Phase 2, Cl
 |---|---|---|
 | 1 | Ingest, signals, candidates, ffmpeg render (no API cost) | done |
 | 2 | Judge (free backends), trends, captions, QA, report | done |
-| 3 | MCP server, SKILL.md, setup docs | done (uploader not built, needs your approval) |
+| 3 | MCP server, SKILL.md, setup docs | done, plus the optional uploader |
 
 ## Requirements
 
@@ -94,6 +94,11 @@ the pipeline (subclass `Judge` in `judge.py`, register it in `JUDGES`).
 detached background processes and live in `<jobs dir>/<id>/`, so they survive restarts and never block a tool call.
 `approve_clip` only records your approval; nothing is ever uploaded. Setup for Claude Desktop and Claude Code:
 [docs/MCP-SETUP.md](docs/MCP-SETUP.md). The skill is [skill/SKILL.md](skill/SKILL.md).
+
+### Optional uploader
+`--upload youtube|instagram|both` offers to upload each rendered clip through the official APIs (your own OAuth
+credentials from environment variables). It asks `y/n` for every clip, needs a real terminal, defaults YouTube to
+private, and is unreachable from the MCP server. See [docs/UPLOADER.md](docs/UPLOADER.md). Untested against the real APIs.
 
 ## Tests
 
