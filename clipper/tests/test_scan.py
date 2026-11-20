@@ -330,3 +330,48 @@ def test_cli_save_preset_and_use(tmp_path, monkeypatch, capsys):
     assert "Saved preset 'speed'" in capsys.readouterr().out
     assert cli.main(["x.mp4", "--preset", "nobody"]) != 0
     assert "No preset named" in capsys.readouterr().err
+
+
+def _long_stream_signals(hours=6.0, hot_minutes=20.0, peaks=(1.5, 2.5, 3.5, 4.5, 5.5)):
+    """A long stream whose first minutes are by far the loudest, plus a few smaller real highlights later."""
+    n = int(hours * 3600 / 0.5)
+    rng = np.random.default_rng(3)
+    x = rng.normal(0, 0.3, n)
+    hot = int(hot_minutes * 60 / 0.5)
+    for i in range(0, hot, 80):                       # many strong spikes packed into the opening
+        x[i:i + 6] += 6.0 + rng.random()
+    for h in peaks:                                   # a real highlight roughly every hour
+        i = int(h * 3600 / 0.5)
+        x[i:i + 8] += 4.0
+    return Signals(t0=0.0, n=n, raw={"audio_rms": x}, z={"audio_rms": x}, combined=x)
+
+
+def test_scan_spreads_picks_over_a_long_stream(cfg):
+    sig = _long_stream_signals()
+    picks = scan.find_moments(None, sig, 40.0, 6, cfg, False, QUIET)[:6]
+    hours = sorted({int(c.start_s // 3600) for c in picks})
+    assert len(hours) >= 4                            # not all from the loud opening
+    assert any(c.start_s > 3600 for c in picks) and sum(c.start_s < 1200 for c in picks) <= 2
+    # gap between neighbours is kept
+    st = sorted(c.start_s for c in picks)
+    assert all(b - a >= 180 for a, b in zip(st, st[1:]))
+
+
+def test_short_stream_keeps_the_old_behaviour(cfg):
+    sig = _long_stream_signals(hours=0.2, hot_minutes=5, peaks=())
+    assert scan.bucket_count(sig.n * 0.5, 6, cfg) == 1
+    cands = scan.find_moments(None, sig, 40.0, 3, cfg, False, QUIET)
+    assert cands == sorted(cands, key=lambda c: -c.score)
+
+
+def test_quiet_stretches_are_not_forced_in(cfg):
+    sig = _long_stream_signals(hours=6.0, hot_minutes=40, peaks=())   # only the first 40 min has anything
+    picks = scan.find_moments(None, sig, 40.0, 4, cfg, False, QUIET)[:4]
+    assert sum(c.start_s < 2400 + 40 for c in picks) >= 3             # dead hours did not displace the real action
+
+
+def test_bucket_count_and_switch_off(cfg):
+    assert scan.bucket_count(23.7 * 3600, 10, cfg) == 10
+    assert scan.bucket_count(2 * 3600, 10, cfg) == 8
+    cfg["scan"]["bucket_s"] = 0
+    assert scan.bucket_count(23.7 * 3600, 10, cfg) == 1

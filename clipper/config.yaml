@@ -50,6 +50,7 @@ captions:              # used with --captions (needs: pip install faster-whisper
 
 scan:
   min_gap_s: 180         # --scan keeps chosen moments at least this many seconds apart
+  bucket_s: 900          # --scan on a long stream spreads the picks over one time slice per this many seconds (0 = off)
   min_motion: 0.25       # drop moments whose picture is frozen/static (NO SIGNAL screens); 0 turns the check off
 
 cache_dir: .clipper-cache

@@ -86,6 +86,13 @@ clipper "https://www.youtube.com/watch?v=ID" --scan --transcribe     # also read
    copy buttons. Pick the ones you like, then upload (see the optional uploader).
 `--n` and `--window` default to 15 and 40 with `--scan`. Everything is cached, so reruns are fast.
 
+**Long streams.** On a long stream the picks are spread over its whole length: the stream is cut into one time
+slice per `scan.bucket_s` seconds (default 900, at most one per clip), and the choice rotates through the slices
+so a loud opening can't fill the whole list. Quiet or AFK stretches are not forced in (a slice whose best moment
+scores under 40% of the overall best is only used if nothing better is left). The log shows where the first picks
+landed (`first picks at 0.3h, 2.1h, ...`). Set `scan.bucket_s: 0` in `config.yaml` to go back to a plain top-N.
+If everything still lands early, check that the job was not started with a `--range`.
+
 ## Phase 2: judge, trends, QA, report (no paid API)
 
 Judging is a swappable backend (`--judge`), so a paid or local model can be added later without touching
