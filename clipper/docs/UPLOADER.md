@@ -40,6 +40,11 @@ Needs an Instagram **Business or Creator** account linked to a Facebook Page, a 
 content-publishing permission, and a long-lived access token plus your Instagram user id. Reels are sent with the
 resumable upload flow, polled until Instagram reports `FINISHED`, and only then published.
 
+## Music and copyright claims
+Clips can contain licensed music (game radio, stream music). clipper cannot hear it, so YouTube may flag the audio with a
+Content ID claim after upload (seen in testing: no strike, no reach impact on a private video). Always upload private first,
+read **Notices** in YouTube Studio, and use **Take action** (mute/replace the song) before considering unlisted or public.
+
 ## Status
 Both flows are covered by unit tests against mocked HTTP (request shapes, per-clip confirmation, privacy default,
 error handling, secret scrubbing, token file permissions). They have **never been run against the real YouTube or

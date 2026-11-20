@@ -18,6 +18,9 @@ If those tools are missing, tell the user the clipper MCP server isn't registere
 - Upload **private** unless the user explicitly asks for unlisted or public. Never upload a clip twice.
 - A live stream that hasn't ended can't be clipped; if the job fails with that message, relay it and stop.
 - Never ask the user to paste API keys, tokens or passwords into the chat.
+- Licensed music (game radio, stream music, copyrighted songs) is common and you cannot hear it. After the user approves
+  an upload, remind them once that YouTube may flag the audio (Content ID) and that they should open the video's
+  Notices in YouTube Studio before ever making it unlisted or public. Private uploads are safe for this check.
 - Judge only what the frames/transcript show. If you can't tell what is happening, say so and score low; never invent a story.
 
 ## Workflow
