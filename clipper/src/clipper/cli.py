@@ -48,6 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="blur: footage centred on a blurred background (default). split: facecam on top, gameplay below (needs --facecam)")
     p.add_argument("--facecam", default=None, metavar="X,Y,W,H",
                    help="facecam rectangle as fractions of the frame, e.g. 0.72,0.55,0.28,0.45 (turns on --layout split)")
+    p.add_argument("--gameplay", default=None, metavar="X,Y,W,H",
+                   help="with --facecam: region of the frame used for the gameplay panel (skips the webcam corner / black bars)")
     p.add_argument("--grid-frame", type=float, default=None, metavar="SECONDS",
                    help="write out/grid.png (a frame with a % grid) from a LOCAL video file so you can read off --facecam numbers")
     p.add_argument("--config", default=None, help="path to config.yaml")
@@ -75,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
             raise ClipperError("--layout split needs --facecam X,Y,W,H (use --grid-frame to find the numbers).")
         elif args.layout:
             cfg["render"]["layout"] = args.layout
+        if args.gameplay:
+            try:
+                cfg["render"]["gameplay"] = [float(v) for v in args.gameplay.split(",")]
+            except ValueError:
+                raise ClipperError("--gameplay must be four numbers like 0.30,0.05,0.70,0.90") from None
         if args.grid_frame is not None:
             from . import grid
             print(f"Wrote {grid.write(args.source, args.grid_frame, Path(args.out))}\nOpen it: the numbers are % of the width (top) and height (left).")

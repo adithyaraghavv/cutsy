@@ -38,14 +38,14 @@ def effective_layout(media: Media, cfg: dict, fill: bool) -> str:
     return "blur"
 
 
-def _facecam(cfg: dict) -> tuple[float, float, float, float]:
-    fc = cfg["render"].get("facecam")
+def _rect(cfg: dict, key: str = "facecam") -> tuple[float, float, float, float]:
+    fc = cfg["render"].get(key)
     try:
         x, y, w, h = (float(v) for v in fc)
     except (TypeError, ValueError):
-        raise ClipperError("facecam must be four numbers x,y,w,h (fractions of the frame), e.g. 0.72,0.55,0.28,0.45") from None
+        raise ClipperError(f"{key} must be four numbers x,y,w,h (fractions of the frame), e.g. 0.72,0.55,0.28,0.45") from None
     if not (0 <= x < 1 and 0 <= y < 1 and 0.05 <= w <= 1 and 0.05 <= h <= 1 and x + w <= 1.001 and y + h <= 1.001):
-        raise ClipperError("facecam x,y,w,h must be fractions between 0 and 1 and stay inside the frame.")
+        raise ClipperError(f"{key} x,y,w,h must be fractions between 0 and 1 and stay inside the frame.")
     return x, y, w, h
 
 
@@ -65,13 +65,18 @@ def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool, ass:
     if layout == "fill":
         chain = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1"
     elif layout == "split":
-        x, y, w, h = _facecam(cfg)
+        x, y, w, h = _rect(cfg, "facecam")
         bot_h = H - top_h
+        if r.get("gameplay"):
+            gx, gy, gw, gh = _rect(cfg, "gameplay")
+            game_crop = f"crop=w=trunc(iw*{gw}/2)*2:h=trunc(ih*{gh}/2)*2:x=iw*{gx}:y=ih*{gy},"
+        else:
+            game_crop = ""
         chain = (
             f"[0:v]split=2[camsrc][gamesrc];"
             f"[camsrc]crop=w=trunc(iw*{w}/2)*2:h=trunc(ih*{h}/2)*2:x=iw*{x}:y=ih*{y},"
             f"scale={W}:{top_h}:force_original_aspect_ratio=increase,crop={W}:{top_h},setsar=1[cam];"
-            f"[gamesrc]scale={W}:{bot_h}:force_original_aspect_ratio=increase,crop={W}:{bot_h},setsar=1[game];"
+            f"[gamesrc]{game_crop}scale={W}:{bot_h}:force_original_aspect_ratio=increase,crop={W}:{bot_h},setsar=1[game];"
             f"[cam][game]vstack=inputs=2"
         )
     else:

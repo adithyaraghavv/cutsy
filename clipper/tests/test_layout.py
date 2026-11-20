@@ -121,3 +121,19 @@ def test_outline_style_still_available(camvideo, tmp_path, cfg2):
     out = tmp_path / "o"
     r = pipeline.run(str(camvideo), n=1, window=10, rng=None, fill=False, out=out, cfg=cfg2, log=QUIET)
     assert r["clips"][0]["qa"][0]["checks"]["hook_visible"] is True
+
+
+def test_gameplay_region_excludes_the_facecam_corner(camvideo, tmp_path, cfg2):
+    cfg2["render"].update(layout="split", facecam=[0.70, 0.55, 0.30, 0.45], gameplay=[0.0, 0.0, 0.69, 1.0])
+    out = tmp_path / "o"
+    r = pipeline.run(str(camvideo), n=1, window=10, rng=None, fill=False, out=out, cfg=cfg2, log=QUIET)
+    f = frame(out / r["clips"][0]["file"], 3)
+    assert is_red(f[:int(480 * 0.40)]) > 0.8                  # facecam still on top
+    assert is_red(f[int(480 * 0.60):]) == 0                   # bottom panel: no facecam pixels at all
+
+
+def test_gameplay_arg_validation(camvideo, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert cli.main([str(camvideo), "--facecam", "0.7,0.55,0.3,0.45", "--gameplay", "x,y,z,w", "--out", "o"]) == 2
+    assert cli.main([str(camvideo), "--facecam", "0.7,0.55,0.3,0.45", "--gameplay", "0.5,0.5,0.9,0.9", "--out", "o"]) == 2
+    assert "gameplay" in capsys.readouterr().err

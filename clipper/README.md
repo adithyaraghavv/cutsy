@@ -65,6 +65,7 @@ in the caption. Facecam layout (like many Shorts): find the webcam rectangle, th
 ```bash
 clipper ".clipper-cache\<id>\video_600-900.mp4" --grid-frame 30 --out grid     # writes grid/grid.png with a 10% grid
 clipper URL --scan --facecam 0.72,0.55,0.28,0.45                                   # x,y,w,h as fractions of the frame
+clipper URL --scan --facecam 0.05,0,0.20,0.30 --gameplay 0.30,0.05,0.70,0.90      # also crop the bottom panel (skip the webcam corner / black bars)
 ```
 `render.title_style: outline` in `config.yaml` brings back the old outlined text.
 
