@@ -189,6 +189,15 @@ def test_qa_detects_black_bars(tmp_path):
     assert not r.passed and r.checks["no_black_bars"] is False and r.fix == {"fill": True}
 
 
+def test_qa_does_not_flag_dark_scene_background(tmp_path):
+    # dark-but-not-black bands (like a blurred background of a night scene) must NOT trigger the fill re-render
+    p = tmp_path / "dark.mp4"
+    _make_clip(p, "testsrc2=s=1080x1920:r=30:d=4,drawbox=x=0:y=0:w=1080:h=300:color=0x080808:t=fill,"
+                  "drawbox=x=0:y=1620:w=1080:h=300:color=0x080808:t=fill")
+    r = qa.heuristic_qa(p, 4.0, 2.6, has_hook=False)
+    assert r.checks["no_black_bars"] is True and r.fix is None
+
+
 def test_qa_passes_good_render_and_sees_hook(landscape, tmp_path, cfg2):
     out = tmp_path / "o"
     r = pipeline.run(str(landscape), n=1, window=10, rng=None, fill=False, out=out, cfg=cfg2, log=QUIET)

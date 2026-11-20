@@ -50,7 +50,8 @@ def grab_gray(path: Path, t: float) -> np.ndarray:
 
 
 def _bar(strip: np.ndarray) -> bool:
-    return strip.mean() < 8 and strip.std() < 3
+    # Only truly pure-black strips count. A dark game scene's blurred background is dark but never this flat/black.
+    return strip.mean() < 1.5 and strip.std() < 1.0
 
 
 def heuristic_qa(clip: Path, duration: float, hook_s: float, has_hook: bool) -> QAResult:
