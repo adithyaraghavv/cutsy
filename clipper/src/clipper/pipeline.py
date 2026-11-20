@@ -35,7 +35,7 @@ def _save_state(out: Path, state: dict) -> None:
     (out / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False, transcribe=False, captions=False, chat=True, cfg=None) -> str:
+def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False, transcribe=False, captions=False, chat=True, cfg=None, min_score=0.0) -> str:
     parts = ["clipper", shlex.quote(source), "--n", str(n), "--window", f"{window:g}"]
     if rng:
         parts += ["--range", f"{rng[0]:g}-{rng[1]:g}"]
@@ -51,6 +51,8 @@ def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False
         parts.append("--captions")
     if not chat:
         parts.append("--no-chat")
+    if min_score:
+        parts += ["--min-score", f"{min_score:g}"]
     r = (cfg or {}).get("render", {})
     if r.get("facecam"):
         parts += ["--facecam", ",".join(f"{v:g}" for v in r["facecam"])]
@@ -115,7 +117,8 @@ def _heuristic_qa(media, clip, c, cfg):
 def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: dict,
         judge_name: str = "heuristic", judgments: str | None = None, shortlist: int | None = None,
         niche: str | None = None, trends_path: str | None = None, qa_name: str = "heuristic",
-        captions: bool = False, chat: bool = True, scan: bool = False, transcribe: bool = False, log=print) -> dict:
+        captions: bool = False, chat: bool = True, scan: bool = False, transcribe: bool = False,
+        min_score: float = 0.0, log=print) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     if captions or (scan and transcribe):
         cap_mod.check_available()
@@ -190,7 +193,7 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
             if not (out / "evidence" / it.id / "contact.jpg").is_file():
                 tr = {it.id: cap_mod.transcript_text(W(it))} if have_words else None
                 evidence.write_pack(M(it), [it], out, window, tr)
-        resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name, scan, transcribe, captions, chat, cfg)
+        resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name, scan, transcribe, captions, chat, cfg, min_score)
         prompt = judge_mod.write_prompt(out, pending, ctx, resume)
         sheets = evidence.write_sheets(out, pending)
         for pr in problems:
@@ -205,7 +208,11 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
                 "problems": problems, "out": str(out)}
 
     ranked = sorted(items, key=lambda it: (-results[it.id].score, it.rank))
-    chosen, rest = ranked[:n], ranked[n:]
+    keep = [it for it in ranked if results[it.id].score >= min_score]
+    if len(keep) < len(ranked):
+        log(f"Leaving out {len(ranked) - len(keep)} candidate(s) judged below --min-score {min_score:g}")
+    chosen = keep[:n]
+    rest = [it for it in ranked if it not in chosen]
     hook_s = float(cfg["render"]["hook_seconds"])
     clips = []
     for i, it in enumerate(chosen, 1):

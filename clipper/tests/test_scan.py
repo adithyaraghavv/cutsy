@@ -216,3 +216,23 @@ def test_printed_resume_command_keeps_layout_options(landscape, tmp_path, cfg2, 
                  judge_name="chat", log=logs.append)
     text = "\n".join(logs)
     assert "--facecam 0.05,0,0.2,0.3" in text and "--gameplay 0.3,0.05,0.7,0.9" in text and "--judgments" in text
+
+
+def test_min_score_leaves_out_low_scored_candidates(landscape, tmp_path, cfg2):
+    cfg2["scan"]["min_motion"] = 0
+    out = tmp_path / "o"
+    r = pipeline.run(str(landscape), n=3, window=12, rng=None, fill=False, out=out, cfg=cfg2, scan=True,
+                     judge_name="chat", log=QUIET)
+    ids = r["pending"]
+    rows = []
+    for k, i in enumerate(ids):
+        ev = json.loads((out / "evidence" / i / "evidence.json").read_text())
+        w = ev["window"]
+        rows.append({"id": i, "score": 8 if k == 0 else 2, "reason": "r", "best_start": w["start_s"], "best_end": w["end_s"],
+                     "hook": "KEEP ME" if k == 0 else "DROP ME", "caption": "c", "hashtags": ["#a", "#b", "#c", "#d", "#e"],
+                     "risk_flags": []})
+    (out / "judgments.json").write_text(json.dumps(rows))
+    r2 = pipeline.run(str(landscape), n=3, window=12, rng=None, fill=False, out=out, cfg=cfg2, scan=True,
+                      judge_name="chat", judgments=str(out / "judgments.json"), min_score=4, log=QUIET)
+    assert [c["hook"] for c in r2["clips"]] == ["KEEP ME"]
+    assert len(r2["not_selected"]) == len(ids) - 1
