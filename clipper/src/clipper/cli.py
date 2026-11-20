@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -33,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--qa-results", default=None, metavar="FILE", help="qa.json written by Claude; re-renders failing clips once")
     p.add_argument("--captions", action="store_true",
                    help="burn in speech captions (2-word chunks, key words highlighted); needs faster-whisper")
+    p.add_argument("--upload", choices=["youtube", "instagram", "both"], default=None,
+                   help="OPTIONAL: after rendering, offer to upload each clip (asks y/n per clip; needs your own API credentials)")
+    p.add_argument("--privacy", choices=["private", "unlisted", "public"], default="private",
+                   help="YouTube visibility for uploads (default: private)")
+    p.add_argument("--upload-only", action="store_true", help="skip rendering; offer to upload the clips already in --out")
     p.add_argument("--config", default=None, help="path to config.yaml")
     p.add_argument("--version", action="version", version=f"clipper {__version__}")
     return p
@@ -50,10 +56,26 @@ def main(argv: list[str] | None = None) -> int:
         if args.qa_results:
             pipeline.apply_qa_results(args.source, out=out, cfg=cfg, qa_results=args.qa_results)
             return 0
+        if args.upload_only and not args.upload:
+            raise ClipperError("--upload-only needs --upload youtube|instagram|both.")
+        if args.upload_only:
+            from . import uploader
+            cj = out / "clips.json"
+            if not cj.is_file():
+                raise ClipperError(f"No {cj} found. Render clips first.")
+            uploader.run_uploads(json.loads(cj.read_text(encoding="utf-8")), out,
+                                 ["youtube", "instagram"] if args.upload == "both" else [args.upload], args.privacy)
+            return 0
         rng = ingest.parse_range(args.rng)
         res = pipeline.run(args.source, n=args.n, window=args.window, rng=rng, fill=args.fill, out=out,
                            cfg=cfg, judge_name=args.judge, judgments=args.judgments, shortlist=args.shortlist,
                            niche=args.niche, trends_path=args.trends, qa_name=args.qa, captions=args.captions)
+        if args.upload and res.get("status") == "done":
+            from . import uploader
+            uploader.run_uploads(res, out, ["youtube", "instagram"] if args.upload == "both" else [args.upload],
+                                 args.privacy)
+        elif args.upload:
+            print("clipper: nothing to upload yet; finish judging first.", file=sys.stderr)
     except ClipperError as e:
         print(f"clipper: {e}", file=sys.stderr)
         return 2
