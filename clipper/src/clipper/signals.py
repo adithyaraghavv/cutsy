@@ -153,7 +153,7 @@ def analyze(media: Media, cfg: dict, span: tuple[float, float] | None = None) ->
     if ch is not None:
         raw["chat"] = ch
 
-    z = {k: zscore(v) for k, v in raw.items()}
+    z = {k: np.clip(zscore(v), -4.0, 5.0) for k, v in raw.items()}   # one huge spike must not dominate
     w = cfg["weights"]
     present = {k: float(w.get(k, 0.0)) for k in z if float(w.get(k, 0.0)) > 0}
     if not present:

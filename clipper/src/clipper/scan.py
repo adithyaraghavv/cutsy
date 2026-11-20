@@ -104,6 +104,6 @@ def find_moments(media, sig, window: float, n: int, cfg: dict, transcribe: bool,
                 log(f"  transcribed {i}/{len(cands)}")
         cands.sort(key=lambda x: -x.score)
     gap = float(cfg.get("scan", {}).get("min_gap_s", 180))
-    spread = diversify(cands, max(n, 1), gap)
-    log(f"Scan: keeping {len(spread)} moments at least {gap:.0f}s apart")
+    spread = diversify(cands, 3 * max(n, 1), gap)     # extra moments so dead screens can be replaced
+    log(f"Scan: {len(spread)} spread-out candidate moments (at least {gap:.0f}s apart); the best {n} with a live picture will be cut")
     return spread

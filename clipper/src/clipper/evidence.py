@@ -90,3 +90,37 @@ def write_pack(media: Media, items: list[Item], out: Path, window: float, transc
             "video_title": media.title, "chapters_in_window": chapters,
         }, indent=2), encoding="utf-8")
     return root
+
+
+def write_sheets(out: Path, items: list[Item], per_sheet: int = 4) -> list[Path]:
+    """judge_sheets/sheet_N.jpg: several candidates' contact sheets stacked with id labels, so a person can
+    upload a handful of images to Claude instead of dozens."""
+    from .fonts import find_bold_font
+    from .render import _esc_path
+    ff = shutil.which("ffmpeg")
+    if not ff:
+        raise ClipperError("ffmpeg was not found on PATH.")
+    d = out / "judge_sheets"
+    d.mkdir(parents=True, exist_ok=True)
+    for old in d.glob("sheet_*.jpg"):
+        old.unlink()
+    font = find_bold_font()
+    ffont = f"fontfile='{_esc_path(font)}':" if font else ""
+    paths = []
+    for si in range(0, len(items), per_sheet):
+        grp = [it for it in items[si:si + per_sheet] if (out / "evidence" / it.id / "contact.jpg").is_file()]
+        if not grp:
+            continue
+        cmd = [ff, "-y", "-v", "error"]
+        fc = []
+        for i, it in enumerate(grp):
+            cmd += ["-i", str(out / "evidence" / it.id / "contact.jpg")]
+            label = f"{it.id}   {it.cand.start_s:.1f}-{it.cand.end_s:.1f}s"
+            fc.append(f"[{i}:v]pad=iw:ih+44:0:44:black,drawtext={ffont}text='{label}':x=8:y=8:fontsize=26:fontcolor=white[v{i}]")
+        fc.append("".join(f"[v{i}]" for i in range(len(grp))) + f"vstack=inputs={len(grp)}[o]" if len(grp) > 1 else "[v0]null[o]")
+        dest = d / f"sheet_{si // per_sheet + 1}.jpg"
+        r = subprocess.run(cmd + ["-filter_complex", ";".join(fc), "-map", "[o]", "-frames:v", "1", "-q:v", "3", str(dest)],
+                           capture_output=True, text=True)
+        if r.returncode == 0 and dest.is_file():
+            paths.append(dest)
+    return paths

@@ -127,6 +127,8 @@ class HeuristicJudge(Judge):
                 hook = spoken
             elif chap:
                 hook = " ".join(re.sub(r"[^\w' !?-]", " ", chap).split()[:6])
+            elif not ctx.get("generic_hooks", True):
+                hook = ""   # nothing real to say yet: no placeholder text; let Claude write the title
             else:
                 options = ([f"{niche.upper()} GOES CRAZY"] if niche and len(niche.split()) <= 2 else []) + self.TEMPLATES
                 hook = next((h for h in options[(it.rank - 1) % len(options):] + options if h not in used_hooks), options[0])
@@ -135,13 +137,14 @@ class HeuristicJudge(Judge):
                     + [f"#{w.lower()}" for w in re.findall(r"[A-Za-z0-9]{4,}", title) if w.lower() not in TAG_STOP] + GENERIC_TAGS:
                 if len(t) > 1 and t.lower() not in [x.lower() for x in tags]:
                     tags.append(t)
-            used_hooks.add(hook)
+            if hook:
+                used_hooks.add(hook)
             out[it.id] = Judgment(
                 id=it.id, score=round(1 + 9 / (1 + math.exp(-(c.score - 2.0))), 1),
                 reason=f"Signal rank #{it.rank}: strongest audio/motion/crowd activity (score {c.score:.2f}). Not reviewed visually.",
                 best_start=round(bs, 2), best_end=round(bs + L, 2), hook=hook,
                 caption=(f'"{quote_from_words(words)}" - {title[:50]}' if words and quote_from_words(words)
-                         else (f"{title[:60]} - {hook.capitalize()}" if title else hook.capitalize())),
+                         else (f"{title[:60]} - {hook.capitalize()}" if title and hook else (title[:80] if title else hook.capitalize()))),
                 hashtags=tags[:5], risk_flags=[], backend=self.name, risk_assessed=False)
         return out, []
 
@@ -252,6 +255,9 @@ Write **{out}** containing ONLY a JSON list, one object per candidate (all {n}),
 Rules, all enforced by clipper (a bad entry is rejected and you will be asked to fix it):
 - `score` is 1-10. `best_start`/`best_end` are ABSOLUTE source seconds inside the candidate's window
   (see `window` in evidence.json) and the length is within `trim_length_s`.
+- Look at what is ACTUALLY on screen. If the picture is a NO SIGNAL / loading / menu / black / ad screen, or nothing
+  clear happens, score it 1-3 and say so in `reason`; do not invent a story. A good `title` describes what happens in
+  the moment, concretely.
 - `title` is the headline burned into the video (white box, black bold text, whole clip): ONE sentence of
   10-22 words that says what is happening and why it matters, like a news headline for the moment; put 3-5 key
   words in CAPS for emphasis (e.g. "He is OFFICIALLY the FIRST person to COMPLETE the whole game in 7 hours");

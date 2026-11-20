@@ -19,7 +19,7 @@ def write(out: Path, res: dict) -> Path:
     for c in res["clips"]:
         j = c.get("judge") or {}
         L += [f"## {c['file']}  ({_fmt(c['start_s'])} - {_fmt(c['end_s'])}, {c['end_s'] - c['start_s']:.0f} s)", "",
-              f"- **Title on video:** {c.get('title') or c['hook']}",
+              f"- **Title on video:** {c.get('title') or c['hook'] or '(none yet: have Claude judge this clip to write one)'}",
               *([f"- **Short hook:** {c['hook']}"] if c.get('title') else []),
               *([f"- **Source:** {c['link']}"] if c.get('link') else []), f"- **Caption:** {j.get('caption', '')}",
               f"- **Hashtags:** {' '.join(j.get('hashtags', []))}",

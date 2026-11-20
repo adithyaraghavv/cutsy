@@ -48,6 +48,7 @@ def test_url_scan_end_to_end(landscape, tmp_path, cfg2, monkeypatch):
     calls = []
     fake_ytdlp(monkeypatch, landscape, calls)
     out = tmp_path / "out"
+    cfg2["scan"]["min_motion"] = 0          # this fixture is mostly a static picture; dead-screen check has its own tests
     r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=2, window=12, rng=None, fill=False, out=out,
                      cfg=cfg2, scan=True, log=QUIET)
     assert r["status"] == "done" and len(r["clips"]) == 2
@@ -94,6 +95,7 @@ def test_transcribe_boosts_reactions_and_writes_title_from_speech(landscape, tmp
                 {"w": "bro", "start": 3.6, "end": 3.9}, {"w": "what", "start": 4.0, "end": 4.2}]
     monkeypatch.setattr(captions, "_transcribe_words", fake)
     calls = []
+    cfg2["scan"]["min_motion"] = 0
     fake_ytdlp(monkeypatch, landscape, calls)
     r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=2, window=12, rng=None, fill=False,
                      out=tmp_path / "o", cfg=cfg2, scan=True, transcribe=True, log=QUIET)
@@ -154,3 +156,53 @@ def test_heuristic_scores_separate_and_hooks_are_unique():
     hooks = [out[it.id].hook for it in items]
     assert scores == sorted(scores, reverse=True) and len(set(scores)) == 5 and max(scores) < 10
     assert len(set(hooks)) == 5
+
+
+def test_dead_screens_are_skipped_and_replaced(landscape, tmp_path, cfg2, monkeypatch):
+    """A NO SIGNAL style (static) moment must be dropped and the next live one used instead."""
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    logs = []
+    r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=1, window=12, rng=None, fill=False,
+                     out=tmp_path / "o", cfg=cfg2, scan=True, log=logs.append)
+    assert len(r["clips"]) == 1 and r["clips"][0]["start_s"] >= 24 and r["clips"][0]["end_s"] <= 48   # the moving part
+    # with the filter on, only the live window survives even if more clips are asked for
+    r2 = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=4, window=12, rng=None, fill=False,
+                      out=tmp_path / "o2", cfg=cfg2, scan=True, log=logs.append)
+    assert 1 <= len(r2["clips"]) < 4
+    assert any("skipped: frozen" in l for l in logs) and any("live moments were found" in l for l in logs)
+
+
+def test_visual_liveliness_detects_static_and_black(tmp_path):
+    from clipper import visual
+    mk = lambda name, vf: subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", vf, "-pix_fmt", "yuv420p",
+                                          str(tmp_path / name)], check=True)
+    mk("static.mp4", "color=c=0x303030:s=320x180:r=25:d=6,drawtext=text='NO SIGNAL':fontsize=30:fontcolor=white")
+    mk("black.mp4", "color=c=black:s=320x180:r=25:d=6")
+    mk("live.mp4", "testsrc2=s=320x180:r=25:d=6")
+    assert visual.dead_reason(visual.liveliness(tmp_path / "static.mp4", 0, 6)).startswith("frozen")
+    assert visual.dead_reason(visual.liveliness(tmp_path / "black.mp4", 0, 6)) == "black screen"
+    assert visual.dead_reason(visual.liveliness(tmp_path / "live.mp4", 0, 6)) is None
+
+
+def test_scan_without_speech_shows_no_placeholder_title(landscape, tmp_path, cfg2, monkeypatch):
+    cfg2["scan"]["min_motion"] = 0
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=2, window=12, rng=None, fill=False,
+                     out=tmp_path / "o", cfg=cfg2, scan=True, log=QUIET)
+    assert all(c["hook"] == "" and not c["title"] for c in r["clips"])
+    assert "needs Claude" in (tmp_path / "o" / "review.html").read_text()
+
+
+def test_chat_judge_scan_makes_labelled_sheets(landscape, tmp_path, cfg2, monkeypatch):
+    cfg2["scan"]["min_motion"] = 0
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    out = tmp_path / "o"
+    r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=3, window=12, rng=None, fill=False, out=out,
+                     cfg=cfg2, scan=True, judge_name="chat", log=QUIET)
+    assert r["status"] == "awaiting_judgments" and len(r["pending"]) >= 1
+    sheets = sorted((out / "judge_sheets").glob("sheet_*.jpg"))
+    assert sheets and probe_json(sheets[0])["streams"][0]["width"] <= 1600
+    assert "NO SIGNAL" in (out / "judge_prompt.md").read_text()

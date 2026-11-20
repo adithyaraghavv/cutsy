@@ -24,7 +24,7 @@ def write(out: Path, res: dict) -> Path:
         link = f'<a href="{html.escape(c["link"])}" target="_blank">open in source video</a>' if c.get("link") else ""
         flags = j.get("risk_flags") or []
         cards.append(f"""<div class="card"><video controls preload="metadata" src="{html.escape(c['file'])}"></video>
-<div class="t" id="t{i}">{html.escape(c.get('title') or c['hook'])}</div>
+<div class="t" id="t{i}">{html.escape(c.get('title') or c['hook'] or '(no title yet: needs Claude to judge)')}</div>
 <div class="c" id="c{i}">{html.escape(cap)}</div>
 <div class="m">{html.escape(c['file'])} &middot; {c['start_s']:.0f}-{c['end_s']:.0f}s &middot; judge {j.get('score', '?')}/10 {link}</div>
 <div class="m">{html.escape(j.get('reason', ''))}</div><div class="m">signals: {html.escape(sig)}</div>

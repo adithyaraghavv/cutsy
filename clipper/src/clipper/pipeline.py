@@ -78,6 +78,27 @@ def _drawn(c: dict) -> str:
     return c.get("title") or c["hook"]
 
 
+def _live_moments(source, media, cands, n, cfg, log) -> list:
+    """Walk the candidates best-first, fetch each moment's picture, drop dead screens, keep n live ones."""
+    from . import visual
+    min_motion = float(cfg.get("scan", {}).get("min_motion", 0.25))
+    valid: list = []
+    for c in cands:
+        if len(valid) >= n:
+            break
+        log(f"[{len(valid) + 1}/{n}] moment {c.start_s:.0f}-{c.end_s:.0f}s")
+        m = ingest.download_section(source, media.video_id, c.start_s, c.end_s, cfg, log) if ingest.is_url(source) else media
+        info = visual.liveliness(m.path, max(0.0, c.start_s - m.offset), c.end_s - c.start_s)
+        why = visual.dead_reason(info, min_motion)
+        if why:
+            log(f"  skipped: {why}")
+            continue
+        valid.append((c, m))
+    if len(valid) < n:
+        log(f"Only {len(valid)} live moments were found (asked for {n}).")
+    return valid
+
+
 def _heuristic_qa(media, clip, c, cfg):
     r = cfg["render"]
     layout = effective_layout(media, cfg, bool(c.get("fill")))
@@ -118,20 +139,22 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
             cands = cand.pick(sig, window, cfg)
         trends = trends_mod.load(niche, trends_path, log)
 
-    k = n if scan else max(n, shortlist or (5 if judge.external else len(cands)))
-    items = evidence.make_items(media, cands[:k], window, trends)
     sec: dict = {}
-    if scan and ingest.is_url(source):
-        log(f"Downloading the {len(items)} chosen moments at full quality (each is cut exactly, so it takes a while)...")
-        for i, it in enumerate(items, 1):
-            log(f"[{i}/{len(items)}] moment {it.cand.start_s:.0f}-{it.cand.end_s:.0f}s")
-            sec[it.id] = ingest.download_section(source, media.video_id, it.cand.start_s, it.cand.end_s, cfg, log)
+    if scan:
+        valid = _live_moments(source, media, cands, n, cfg, log)
+        items = evidence.make_items(media, [c for c, _ in valid], window, trends)
+        if ingest.is_url(source):
+            sec = {it.id: m for it, (_, m) in zip(items, valid)}
+    else:
+        k = max(n, shortlist or (5 if judge.external else len(cands)))
+        items = evidence.make_items(media, cands[:k], window, trends)
     M = lambda it: sec.get(it.id, media)  # noqa: E731 - media that holds this item's picture
     W = (lambda it: scan_mod.cand_words(media, it.cand, cfg)) if scan else (lambda it: _words_for(media, it, cfg))
     have_words = bool(captions or (scan and transcribe))
     ctx = {"niche": niche, "title": media.title, "trends": trends, "judgments_path": judgments,
            "chapters_by_item": {it.id: _chapter_at(media, it.cand.peak_s) for it in items},
-           "words_by_item": {it.id: W(it) for it in items} if scan and have_words else {}}
+           "words_by_item": {it.id: W(it) for it in items} if scan and have_words else {},
+           "generic_hooks": not scan}
 
     results: dict = {}
     for it in items:
@@ -164,10 +187,13 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
                 evidence.write_pack(M(it), [it], out, window, tr)
         resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name, scan, transcribe, captions, chat)
         prompt = judge_mod.write_prompt(out, pending, ctx, resume)
+        sheets = evidence.write_sheets(out, pending)
         for pr in problems:
             log(f"  judgments problem: {pr}")
+        if sheets:
+            log(f"Made {len(sheets)} picture sheet(s) for Claude in {out / 'judge_sheets'} (4 candidates per image).")
         log(f"\nWaiting for Claude's judgments on {len(pending)} candidate(s).\n"
-            f"  1. Ask Claude (in your chat) to follow: {prompt}\n"
+            f"  1. Give Claude the sheet images in {out / 'judge_sheets'} plus {prompt}\n"
             f"  2. It writes: {out / 'judgments.json'}\n"
             f"  3. Then run: {resume}")
         return {"status": "awaiting_judgments", "prompt": str(prompt), "pending": [i.id for i in pending],
