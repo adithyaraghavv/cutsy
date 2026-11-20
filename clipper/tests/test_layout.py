@@ -137,3 +137,22 @@ def test_gameplay_arg_validation(camvideo, tmp_path, capsys, monkeypatch):
     assert cli.main([str(camvideo), "--facecam", "0.7,0.55,0.3,0.45", "--gameplay", "x,y,z,w", "--out", "o"]) == 2
     assert cli.main([str(camvideo), "--facecam", "0.7,0.55,0.3,0.45", "--gameplay", "0.5,0.5,0.9,0.9", "--out", "o"]) == 2
     assert "gameplay" in capsys.readouterr().err
+
+
+def test_headline_box_is_one_solid_block_with_no_gaps_between_lines(camvideo, tmp_path, cfg2):
+    """Regression: newer ffmpeg drew a separate box per line with gaps; the box must be one solid block."""
+    from pathlib import Path
+    from clipper import ingest
+    m = ingest.Media(path=Path(camvideo), **ingest.probe(Path(camvideo)))
+    out = tmp_path / "t.mp4"
+    render.render_clip(m, 0, 4, out, HEADLINE, cfg2)
+    f = frame(out, 2)
+    white = (f > 235).all(axis=2)
+    band = white[int(480 * 0.04):int(480 * 0.40)]
+    rows = np.where(band.any(axis=1))[0]
+    cols = np.where(band.any(axis=0))[0]
+    top, bottom, left, right = rows.min(), rows.max(), cols.min(), cols.max()
+    assert bottom - top > 40                                       # several lines tall (at 270x480 scale)
+    inner_col = band[top + 8:bottom - 8, left + 6]                 # a column just inside the left edge
+    assert inner_col.all(), "gap found inside the headline box"
+    assert abs((left + right) / 2 - 135) < 6                       # horizontally centred
