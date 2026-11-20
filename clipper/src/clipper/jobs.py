@@ -65,7 +65,7 @@ def load(job_id: str) -> dict:
 
 
 def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, captions=False,
-           judge="chat", shortlist=None) -> dict:
+           judge="chat", shortlist=None, scan=False, transcribe=False) -> dict:
     source = (source or "").strip()
     if not source:
         raise ClipperError("Give a video URL or a local file path.")
@@ -84,7 +84,7 @@ def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, c
     job = {"id": jid, "source": ingest.is_url(source) and source or str(Path(source).expanduser().resolve()),
            "params": {"n": int(n), "niche": niche or None, "window": float(window),
                       "range": list(r) if r else None, "fill": bool(fill), "captions": bool(captions),
-                      "judge": judge, "shortlist": shortlist, "trends": str(Path(trends).resolve()) if trends else None,
+                      "judge": judge, "shortlist": shortlist, "scan": bool(scan), "transcribe": bool(transcribe), "trends": str(Path(trends).resolve()) if trends else None,
                       "judgments": None},
            "status": "queued", "message": "", "pending": [], "problems": [], "approvals": {},
            "resumes": 0, "created": _now(), "heartbeat": _now()}

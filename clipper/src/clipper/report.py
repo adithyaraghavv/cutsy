@@ -19,7 +19,8 @@ def write(out: Path, res: dict) -> Path:
     for c in res["clips"]:
         j = c.get("judge") or {}
         L += [f"## {c['file']}  ({_fmt(c['start_s'])} - {_fmt(c['end_s'])}, {c['end_s'] - c['start_s']:.0f} s)", "",
-              f"- **Hook:** {c['hook']}", f"- **Caption:** {j.get('caption', '')}",
+              f"- **Title on video:** {c['hook']}",
+              *([f"- **Source:** {c['link']}"] if c.get('link') else []), f"- **Caption:** {j.get('caption', '')}",
               f"- **Hashtags:** {' '.join(j.get('hashtags', []))}",
               f"- **Judge score:** {j.get('score', 'n/a')}/10 - {j.get('reason', '')}",
               f"- **Risk flags:** {', '.join(j.get('risk_flags', [])) or 'none'}"

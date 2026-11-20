@@ -34,15 +34,19 @@ def _err(e: ClipperError) -> dict:
 
 @server.tool()
 def start_clip_job(url: str, n: int = 3, niche: str | None = None, range: str | None = None,
-                   window: float = 55.0, fill: bool = False, captions: bool = False) -> dict:
+                   window: float = 55.0, fill: bool = False, captions: bool = False, scan: bool = False,
+                   transcribe: bool = False) -> dict:
     """Start a background clipping job for a video URL (or local file path). Returns a job_id immediately.
 
     n: clips wanted (1-10). niche: topic like "gta6" (steers hooks/hashtags). range: "START-END" seconds, to analyse
     only part of a long stream. fill: crop to fill 9:16 instead of blurred bars. captions: burn in speech captions.
+    scan: analyse the WHOLE stream (audio, chat replay, most-replayed) and cut the best n moments (use n=10-15);
+    transcribe: also read candidates' speech for reactions (needs faster-whisper).
     Only use for streams the user has the streamer's written permission to clip. Live (unfinished) streams fail.
     """
     try:
-        job = jobs.create(url, n=n, niche=niche, window=window, rng=range, fill=fill, captions=captions, judge="chat")
+        job = jobs.create(url, n=n, niche=niche, window=window, rng=range, fill=fill, captions=captions, judge="chat",
+                          scan=scan, transcribe=transcribe)
         jobs.launch(job)
     except ClipperError as e:
         return _err(e)

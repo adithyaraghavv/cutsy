@@ -56,6 +56,23 @@ Output in `--out` (default `out/`, git-ignored):
 4. **Render** - blurred background + centered footage for landscape; scale-crop for portrait. A hook
    (Phase 1: chapter/title words; Phase 2: Claude) shows for the first 2.6 s via `drawtext` + `textfile`.
 
+## Scan mode: find the best moments of a whole stream
+
+```bash
+clipper "https://www.youtube.com/watch?v=ID" --scan                  # 15 clips of ~40 s from the entire video
+clipper "https://www.youtube.com/watch?v=ID" --scan --transcribe     # also read speech for reactions (needs faster-whisper)
+```
+1. Downloads only the **audio** of the whole stream (small), plus YouTube's "most replayed" data and the **chat replay**
+   when available (`--no-chat` skips the slow chat download).
+2. Scores every half-second on loudness, sudden rises, chat-message spikes and replay heat, then picks the strongest
+   windows and moves each so a little set-up comes before the peak.
+3. With `--transcribe`, reads what was said in each candidate and boosts reaction moments ("no way", "oh my god",
+   laughing...); the on-video **title** and a suggested caption come from the strongest spoken reaction.
+4. Downloads **only the chosen moments** at full quality, renders 9:16 clips, and writes `review.html`: every clip
+   playable in the browser with the title, caption, hashtags, a link to that moment in the source video and
+   copy buttons. Pick the ones you like, then upload (see the optional uploader).
+`--n` and `--window` default to 15 and 40 with `--scan`. Everything is cached, so reruns are fast.
+
 ## Phase 2: judge, trends, QA, report (no paid API)
 
 Judging is a swappable backend (`--judge`), so a paid or local model can be added later without touching

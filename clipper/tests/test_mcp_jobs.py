@@ -72,7 +72,7 @@ def test_full_job_lifecycle_in_background(jobs_env, landscape):
 
     lc = mcp_server.list_clips(jid)
     assert len(lc["clips"]) == 2 and Path(lc["clips"][0]["path"]).is_file()
-    assert lc["clips"][0]["approved"] is False and "report" in lc and "Hook" in lc["report"]
+    assert lc["clips"][0]["approved"] is False and "report" in lc and "Title on video" in lc["report"]
     assert (jobs.job_path(jid) / "out" / "report.md").is_file()
 
     name = lc["clips"][0]["clip"]

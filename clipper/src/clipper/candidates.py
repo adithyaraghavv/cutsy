@@ -65,3 +65,30 @@ def pick(sig: Signals, window_s: float, cfg: dict, count: int | None = None) -> 
         if len(chosen) >= count:
             break
     return chosen
+
+
+def _score_at(sig: Signals, s: int, wb: int, cfg: dict):
+    cc = cfg["candidates"]
+    c = sig.combined[s:s + wb]
+    k = max(1, math.ceil(float(cc["top_fraction"]) * len(c)))
+    top = np.partition(c, len(c) - k)[len(c) - k:].mean()
+    return float(top + float(cc["mean_weight"]) * c.mean()), {n: float(v[s:s + wb].mean()) for n, v in sig.z.items()}
+
+
+def recenter(cands: list, sig: Signals, window_s: float, cfg: dict, lead_frac: float = 0.35) -> list:
+    """Slide each window so the strongest moment sits ~35% in (a little set-up, then the payoff),
+    re-score it, and drop windows that now overlap a better one."""
+    wb = min(max(1, int(round(window_s / BIN))), sig.n)
+    moved = []
+    for c in cands:
+        pk = int(round((c.peak_s - sig.t0) / BIN))
+        s = max(0, min(pk - int(wb * lead_frac), sig.n - wb))
+        score, bd = _score_at(sig, s, wb, cfg)
+        moved.append(Candidate(start_s=sig.t0 + s * BIN, end_s=sig.t0 + (s + wb) * BIN, score=score,
+                               breakdown=bd, peak_s=c.peak_s))
+    moved.sort(key=lambda x: -x.score)
+    kept: list = []
+    for c in moved:
+        if all(c.end_s <= k.start_s or c.start_s >= k.end_s for k in kept):
+            kept.append(c)
+    return kept

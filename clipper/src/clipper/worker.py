@@ -42,7 +42,7 @@ def main(argv=None) -> int:
             job["source"], n=p["n"], window=p["window"], rng=tuple(p["range"]) if p["range"] else None,
             fill=p["fill"], out=d / "out", cfg=cfg, judge_name=p["judge"], judgments=p.get("judgments"),
             shortlist=p.get("shortlist"), niche=p.get("niche"), trends_path=p.get("trends"),
-            captions=p["captions"], log=log)
+            captions=p["captions"], scan=p.get("scan", False), transcribe=p.get("transcribe", False), log=log)
         job = jobs.load(jid)
         if res["status"] == "awaiting_judgments":
             job.update(status="awaiting_judgments", pending=res["pending"], problems=res.get("problems", []),

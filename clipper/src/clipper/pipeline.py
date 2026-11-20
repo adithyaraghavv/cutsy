@@ -5,7 +5,8 @@ import shlex
 from pathlib import Path
 
 from . import candidates as cand
-from . import captions as cap_mod, evidence, ingest, judge as judge_mod, qa as qa_mod, report, signals
+from . import captions as cap_mod, evidence, ingest, judge as judge_mod, qa as qa_mod, report, review, signals
+from . import scan as scan_mod
 from . import trends as trends_mod
 from .errors import ClipperError
 from .render import render_clip
@@ -34,7 +35,7 @@ def _save_state(out: Path, state: dict) -> None:
     (out / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name) -> str:
+def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False, transcribe=False, captions=False, chat=True) -> str:
     parts = ["clipper", shlex.quote(source), "--n", str(n), "--window", f"{window:g}"]
     if rng:
         parts += ["--range", f"{rng[0]:g}-{rng[1]:g}"]
@@ -42,6 +43,14 @@ def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name) -> str:
         parts += ["--niche", shlex.quote(niche)]
     if fill:
         parts.append("--fill")
+    if scan:
+        parts.append("--scan")
+    if transcribe:
+        parts.append("--transcribe")
+    if captions:
+        parts.append("--captions")
+    if not chat:
+        parts.append("--no-chat")
     parts += ["--judge", judge_name, "--judgments", shlex.quote(str(Path(out) / "judgments.json")), "--out", shlex.quote(str(out))]
     return " ".join(parts)
 
@@ -71,18 +80,20 @@ def _heuristic_qa(media, clip, c, cfg):
 def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: dict,
         judge_name: str = "heuristic", judgments: str | None = None, shortlist: int | None = None,
         niche: str | None = None, trends_path: str | None = None, qa_name: str = "heuristic",
-        captions: bool = False, chat: bool = True, log=print) -> dict:
+        captions: bool = False, chat: bool = True, scan: bool = False, transcribe: bool = False, log=print) -> dict:
     out.mkdir(parents=True, exist_ok=True)
-    if captions:
+    if captions or (scan and transcribe):
         cap_mod.check_available()
-    media = ingest.resolve(source, rng, cfg, log=log, chat=chat)
-    log(f"Source: {media.title or media.source}  ({media.duration:.0f}s, {media.width}x{media.height}"
+    media = ingest.resolve_scan(source, cfg, log, chat) if scan else ingest.resolve(source, rng, cfg, log=log, chat=chat)
+    log(f"Source: {media.title or media.source}  ({media.duration:.0f}s, "
+        f"{(str(media.width) + 'x' + str(media.height)) if media.width else 'audio only'}"
         f"{'' if media.has_audio else ', no audio'})")
     judge = judge_mod.get_judge(judge_name)
 
     state = _load_state(out)
     same = bool(state and state.get("video_id") == media.video_id and state.get("window") == window
-                and state.get("range") == (list(rng) if rng else None) and state.get("candidates"))
+                and state.get("range") == (list(rng) if rng else None) and state.get("candidates")
+                and bool(state.get("scan")) == scan)
     if same:
         cands = [_cand_from_dict(d) for d in state["candidates"]]
         trends = state["trends"]
@@ -92,13 +103,26 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         log(f"Extra signals: {', '.join(extras) or 'none'}")
         sig = signals.analyze(media, cfg, rng)
         log(f"Analysed {sig.n * signals.BIN:.0f}s: {', '.join(sig.raw)}")
-        cands = cand.pick(sig, window, cfg)
+        if scan:
+            cands = scan_mod.find_moments(media, sig, window, n, cfg, transcribe or captions, log)
+        else:
+            cands = cand.pick(sig, window, cfg)
         trends = trends_mod.load(niche, trends_path, log)
 
-    k = max(n, shortlist or (5 if judge.external else len(cands)))
+    k = n if scan else max(n, shortlist or (5 if judge.external else len(cands)))
     items = evidence.make_items(media, cands[:k], window, trends)
+    sec: dict = {}
+    if scan and ingest.is_url(source):
+        log(f"Downloading the {len(items)} chosen moments at full quality (each is cut exactly, so it takes a while)...")
+        for i, it in enumerate(items, 1):
+            log(f"[{i}/{len(items)}] moment {it.cand.start_s:.0f}-{it.cand.end_s:.0f}s")
+            sec[it.id] = ingest.download_section(source, media.video_id, it.cand.start_s, it.cand.end_s, cfg, log)
+    M = lambda it: sec.get(it.id, media)  # noqa: E731 - media that holds this item's picture
+    W = (lambda it: scan_mod.cand_words(media, it.cand, cfg)) if scan else (lambda it: _words_for(media, it, cfg))
+    have_words = bool(captions or (scan and transcribe))
     ctx = {"niche": niche, "title": media.title, "trends": trends, "judgments_path": judgments,
-           "chapters_by_item": {it.id: _chapter_at(media, it.cand.peak_s) for it in items}}
+           "chapters_by_item": {it.id: _chapter_at(media, it.cand.peak_s) for it in items},
+           "words_by_item": {it.id: W(it) for it in items} if scan and have_words else {}}
 
     results: dict = {}
     for it in items:
@@ -116,7 +140,7 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         pending = [it for it in items if it.id not in results]
 
     new_state = {"source": source, "video_id": media.video_id, "window": window,
-                 "range": list(rng) if rng else None, "n": n, "fill": fill, "niche": niche,
+                 "range": list(rng) if rng else None, "n": n, "fill": fill, "niche": niche, "scan": scan,
                  "judge": judge.name, "trends": trends, "candidates": [_cand_to_dict(c) for c in cands]}
     _save_state(out, new_state)
     (out / "candidates.json").write_text(json.dumps(
@@ -127,9 +151,9 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
             raise ClipperError("Internal error: judge left candidates unjudged.")
         for it in pending:
             if not (out / "evidence" / it.id / "contact.jpg").is_file():
-                tr = {it.id: cap_mod.transcript_text(_words_for(media, it, cfg))} if captions else None
-                evidence.write_pack(media, [it], out, window, tr)
-        resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name)
+                tr = {it.id: cap_mod.transcript_text(W(it))} if have_words else None
+                evidence.write_pack(M(it), [it], out, window, tr)
+        resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name, scan, transcribe, captions, chat)
         prompt = judge_mod.write_prompt(out, pending, ctx, resume)
         for pr in problems:
             log(f"  judgments problem: {pr}")
@@ -150,13 +174,15 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         log(f"[{i}/{len(chosen)}] {j.best_start:.1f}-{j.best_end:.1f}s judge {j.score:g}/10 hook \"{j.hook}\" -> {name}")
         cw = None
         if captions:
-            cw = cap_mod.slice_words(_words_for(media, it, cfg), j.best_start, j.best_end)
+            cw = cap_mod.slice_words(W(it), j.best_start, j.best_end)
             log(f"    captions: {len(cw)} words")
-        end = _render_one(media, j, out, name, j.hook, fill, cfg, hook_s, cw)
+        end = _render_one(M(it), j, out, name, j.hook, fill, cfg, hook_s, cw)
         c = {"file": name, "id": it.id, "start_s": round(j.best_start, 2), "end_s": round(end, 2),
              "score": round(it.cand.score, 4), "hook": j.hook, "fill": fill,
              "signals": {a: round(b, 3) for a, b in it.cand.breakdown.items()},
-             "judge": j.to_dict(), "qa": [], "rerendered": False, "caption_words": cw or []}
+             "judge": j.to_dict(), "qa": [], "rerendered": False, "caption_words": cw or [],
+             "link": _link(media, j.best_start),
+             "section": ({"path": str(sec[it.id].path), "offset": sec[it.id].offset} if it.id in sec else None)}
         if qa_name != "none":
             q = _heuristic_qa(media, out / name, c, cfg)
             c["qa"].append({**q.to_dict()})
@@ -164,7 +190,7 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
                 log(f"    QA failed {q.checks}; re-rendering once with fix {q.fix}")
                 c["fill"] = q.fix.get("fill", c["fill"])
                 c["hook"] = q.fix.get("hook", c["hook"])
-                _render_one(media, j, out, name, c["hook"], c["fill"], cfg, hook_s, c["caption_words"] or None)
+                _render_one(M(it), j, out, name, c["hook"], c["fill"], cfg, hook_s, c["caption_words"] or None)
                 c["rerendered"] = True
                 c["qa"].append(_heuristic_qa(media, out / name, c, cfg).to_dict())
         clips.append(c)
@@ -181,13 +207,21 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         res["qa_prompt"] = str(p)
         log(f"\nOptional Claude QA: ask Claude to follow {p}, then run:\n"
             f"  clipper {shlex.quote(source)} --out {shlex.quote(str(out))} --qa-results {out / 'qa.json'}")
-    log(f"\nDone: {len(clips)} clip(s) in {out}/ (see clips.json and report.md)")
+    log(f"\nDone: {len(clips)} clip(s) in {out}/\n  Open {out / 'review.html'} in your browser to watch them and copy titles/captions (details: report.md)")
     return res
+
+
+def _link(media, start_s: float) -> str | None:
+    src = media.source or ""
+    if ingest.is_url(src) and ("youtube.com" in src or "youtu.be" in src):
+        return f"https://www.youtube.com/watch?v={media.video_id}&t={int(start_s)}s"
+    return None
 
 
 def _finish(out: Path, res: dict) -> None:
     (out / "clips.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
     report.write(out, res)
+    review.write(out, res)
 
 
 def apply_qa_results(source: str, *, out: Path, cfg: dict, qa_results: str, log=print) -> dict:
@@ -198,7 +232,7 @@ def apply_qa_results(source: str, *, out: Path, cfg: dict, qa_results: str, log=
     res = json.loads(p.read_text(encoding="utf-8"))
     state = _load_state(out) or {}
     rng = tuple(state["range"]) if state.get("range") else None
-    media = ingest.resolve(source, rng, cfg)
+    media = None
     verdicts = qa_mod.load_chat_results(qa_results)
     hook_s = float(cfg["render"]["hook_seconds"])
     for c in res["clips"]:
@@ -211,7 +245,13 @@ def apply_qa_results(source: str, *, out: Path, cfg: dict, qa_results: str, log=
             c["fill"] = v.fix.get("fill", c["fill"])
             c["hook"] = v.fix.get("hook", c["hook"])
             j = judge_mod.Judgment(**{**c["judge"], "best_start": c["start_s"], "best_end": c["end_s"]})
-            _render_one(media, j, out, c["file"], c["hook"], c["fill"], cfg, hook_s, c.get("caption_words") or None)
+            if c.get("section"):
+                sp = Path(c["section"]["path"])
+                cm = ingest.Media(path=sp, offset=c["section"]["offset"], video_id=res.get("video_id", ""), **ingest.probe(sp))
+            else:
+                media = media or ingest.resolve(source, rng, cfg)
+                cm = media
+            _render_one(cm, j, out, c["file"], c["hook"], c["fill"], cfg, hook_s, c.get("caption_words") or None)
             c["rerendered"] = True
         elif not v.passed:
             log(f"{c['file']}: Claude QA failed but gave no fix; left as is. Issues: {'; '.join(v.notes)}")

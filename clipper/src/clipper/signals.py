@@ -144,7 +144,8 @@ def analyze(media: Media, cfg: dict, span: tuple[float, float] | None = None) ->
         rms = audio_rms(media.path, start_in_file, dur, n)
         raw["audio_rms"] = rms
         raw["audio_rise"] = rise(rms, int(sc["rise_lookback_s"] / BIN))
-    raw["motion"] = motion(media.path, start_in_file, dur, n)
+    if media.width and media.height:      # audio-only scan files have no picture
+        raw["motion"] = motion(media.path, start_in_file, dur, n)
     hm = heatmap_signal(media.heatmap, abs0, n)
     if hm is not None:
         raw["heatmap"] = hm

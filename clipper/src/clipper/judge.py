@@ -110,7 +110,12 @@ class HeuristicJudge(Judge):
             L = min(d, 55.0 if d > 60 else d)
             bs = min(max(c.peak_s - L / 2, c.start_s), c.end_s - L)
             chap = (ctx.get("chapters_by_item") or {}).get(it.id)
-            if chap:
+            words = (ctx.get("words_by_item") or {}).get(it.id) or []
+            from .scan import hook_from_words, quote_from_words
+            spoken = hook_from_words(words) if words else None
+            if spoken:
+                hook = spoken
+            elif chap:
                 hook = " ".join(re.sub(r"[^\w' !?-]", " ", chap).split()[:6])
             else:
                 hook = self.TEMPLATES[(it.rank - 1) % len(self.TEMPLATES)]
@@ -125,7 +130,8 @@ class HeuristicJudge(Judge):
                 id=it.id, score=round(max(1.0, min(10.0, 5 + 1.5 * c.score)), 1),
                 reason=f"Signal rank #{it.rank}: strongest audio/motion/crowd activity (score {c.score:.2f}). Not reviewed visually.",
                 best_start=round(bs, 2), best_end=round(bs + L, 2), hook=hook,
-                caption=(f"{title[:60]} - {hook.capitalize()}" if title else hook.capitalize()),
+                caption=(f'"{quote_from_words(words)}" - {title[:50]}' if words and quote_from_words(words)
+                         else (f"{title[:60]} - {hook.capitalize()}" if title else hook.capitalize())),
                 hashtags=tags[:5], risk_flags=[], backend=self.name, risk_assessed=False)
         return out, []
 

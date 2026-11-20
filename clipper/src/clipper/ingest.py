@@ -47,7 +47,7 @@ def _need(tool: str) -> str:
     return p
 
 
-def probe(path: Path) -> dict:
+def probe(path: Path, need_video: bool = True) -> dict:
     try:
         out = subprocess.run(
             [_need("ffprobe"), "-v", "error", "-print_format", "json",
@@ -58,12 +58,14 @@ def probe(path: Path) -> dict:
         raise ClipperError(f"Could not read {path} as a video (ffprobe: {e.stderr.strip()[:200]}).") from None
     info = json.loads(out)
     v = next((s for s in info["streams"] if s["codec_type"] == "video"), None)
-    if v is None:
+    if v is None and need_video:
         raise ClipperError(f"{path} has no video stream.")
     has_audio = any(s["codec_type"] == "audio" for s in info["streams"])
-    dur = float(info["format"].get("duration") or v.get("duration") or 0)
+    dur = float(info["format"].get("duration") or (v or {}).get("duration") or 0)
     if dur <= 0:
         raise ClipperError(f"Could not determine the duration of {path}.")
+    if v is None:
+        return {"duration": dur, "width": 0, "height": 0, "has_audio": has_audio}
     rot = 0
     for sd in v.get("side_data_list", []) or []:
         if "rotation" in sd:
@@ -186,18 +188,7 @@ def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
         if not target.is_file():
             raise ClipperError("Download finished but the video file wasn't found in the cache.")
 
-    chat_times: list[float] = []
-    chat_file = next(d.glob("chat*.live_chat.json"), None)
-    if chat_file is None and chat:
-        log("Fetching chat replay (skip with --no-chat; slow for very long streams)...")
-        try:
-            _run_ytdlp(["--skip-download", "--write-subs", "--sub-langs", "live_chat",
-                        "--no-playlist", "-o", str(d / "chat"), url], check=False)
-        except ClipperError:
-            pass
-        chat_file = next(d.glob("chat*.live_chat.json"), None)
-    if chat_file:
-        chat_times = parse_chat(chat_file)
+    chat_times = _get_chat(d, url, log, chat)
 
     pr = probe(target)
     return Media(
@@ -206,3 +197,72 @@ def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
         chapters=info.get("chapters") or [], heatmap=info.get("heatmap") or [],
         chat_times=chat_times, source=url, **pr,
     )
+
+
+def _get_chat(d: Path, url: str, log, chat: bool) -> list[float]:
+    """Live-chat replay message times (seconds), cached; soft-fails to []."""
+    chat_file = next(d.glob("chat*.live_chat.json"), None)
+    if chat_file is None and chat:
+        log("Fetching chat replay (skip with --no-chat; can take several minutes for very long streams)...")
+        try:
+            _run_ytdlp(["--skip-download", "--write-subs", "--sub-langs", "live_chat",
+                        "--no-playlist", "-o", str(d / "chat"), url], check=False)
+        except ClipperError:
+            pass
+        chat_file = next(d.glob("chat*.live_chat.json"), None)
+    return parse_chat(chat_file) if chat_file else []
+
+
+def _cache_dir(cfg: dict, info: dict, url: str) -> tuple[str, Path]:
+    vid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(info.get("id") or hashlib.sha1(url.encode()).hexdigest()[:10]))
+    d = Path(cfg["cache_dir"]) / vid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "info.json").write_text(json.dumps(info), encoding="utf-8")
+    return vid, d
+
+
+def resolve_scan(source: str, cfg: dict, log, chat: bool = True) -> Media:
+    """Scan mode: for a URL, download AUDIO ONLY for the whole stream (small) plus metadata and chat replay.
+    Full-quality video is fetched later, only for the chosen moments. Local files are used as they are."""
+    if not is_url(source):
+        return resolve(source, None, cfg, log=log, chat=chat)
+    _ytdlp()
+    log("Fetching video info (can take a minute for very long streams)...")
+    info = fetch_info(source)
+    check_not_live(info)
+    vid, d = _cache_dir(cfg, info, source)
+    audio = next((p for p in d.glob("audio.*") if p.suffix not in (".part", ".ytdl", ".json")), None)
+    if audio is None:
+        log("Downloading the audio track of the whole stream for scanning (yt-dlp progress follows)...")
+        try:
+            _run_ytdlp(["-f", "ba/b", "--no-playlist", "-o", str(d / "audio.%(ext)s"), source], show=True)
+        except subprocess.CalledProcessError:
+            raise ClipperError("Audio download failed (see the yt-dlp messages above).") from None
+        audio = next((p for p in d.glob("audio.*") if p.suffix not in (".part", ".ytdl", ".json")), None)
+        if audio is None:
+            raise ClipperError("Audio download finished but the file wasn't found in the cache.")
+    chat_times = _get_chat(d, source, log, chat)
+    pr = probe(audio, need_video=False)
+    return Media(path=audio, offset=0.0, video_id=vid, title=info.get("title") or "",
+                 description=info.get("description") or "", chapters=info.get("chapters") or [],
+                 heatmap=info.get("heatmap") or [], chat_times=chat_times, source=source, **pr)
+
+
+def download_section(source: str, video_id: str, start: float, end: float, cfg: dict, log) -> Media:
+    """Download one moment at full quality (<= max height), re-cut exactly; cached."""
+    d = Path(cfg["cache_dir"]) / video_id
+    s, e = max(0.0, start - 1.0), end + 1.0
+    target = d / f"sec_{int(s * 10)}-{int(e * 10)}.mp4"
+    if not target.is_file():
+        h = int(cfg["render"]["max_height_download"])
+        fmt = f"bv*[height<={h}][vcodec^=avc1]+ba/bv*[height<={h}]+ba/b[height<={h}]/b"
+        log(f"  downloading {s:.0f}-{e:.0f}s at <= {h}p ...")
+        try:
+            _run_ytdlp(["-f", fmt, "--merge-output-format", "mp4", "--no-playlist",
+                        "--download-sections", f"*{s:.1f}-{e:.1f}", "--force-keyframes-at-cuts",
+                        "-o", str(target.with_suffix(".%(ext)s")), source], show=True)
+        except subprocess.CalledProcessError:
+            raise ClipperError("Section download failed (see the yt-dlp messages above).") from None
+        if not target.is_file():
+            raise ClipperError("Section download finished but the file wasn't found in the cache.")
+    return Media(path=target, offset=s, video_id=video_id, source=source, **probe(target))
