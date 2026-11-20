@@ -44,12 +44,24 @@ def _now() -> float:
     return time.time()
 
 
+WRITE_TRIES = 12
+
+
 def write_job(job: dict) -> None:
     d = job_path(job["id"])
     tmp = d / f"job.json.{os.getpid()}.tmp"
     job["updated"] = _now()
     tmp.write_text(json.dumps(job, indent=2), encoding="utf-8")
-    os.replace(tmp, d / "job.json")
+    for attempt in range(WRITE_TRIES):
+        try:
+            os.replace(tmp, d / "job.json")
+            return
+        except PermissionError:
+            # Windows refuses the replace while another process (a worker, the MCP server) has job.json open.
+            if attempt == WRITE_TRIES - 1:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def load(job_id: str) -> dict:

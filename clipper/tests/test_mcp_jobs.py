@@ -163,3 +163,29 @@ def test_stdio_protocol_end_to_end(jobs_env, landscape):
 
     jid = asyncio.run(go())
     assert (jobs.job_path(jid) / "out" / "clip_1.mp4").is_file()
+
+
+def test_write_job_survives_a_busy_file_on_windows(tmp_path, monkeypatch):
+    """Windows raises PermissionError from os.replace while another process holds job.json open."""
+    from clipper import jobs
+    monkeypatch.setenv("CLIPPER_JOBS_DIR", str(tmp_path / "jobs"))
+    f = tmp_path / "v.mp4"
+    f.write_bytes(b"x")
+    job = jobs.create(str(f), n=1)
+    real, state = os.replace, {"n": 0}
+
+    def busy(a, b):
+        state["n"] += 1
+        if state["n"] <= 3:
+            raise PermissionError(13, "in use")
+        return real(a, b)
+    monkeypatch.setattr(jobs.os, "replace", busy)
+    monkeypatch.setattr(jobs.time, "sleep", lambda s: None)
+    job["message"] = "hello"
+    jobs.write_job(job)
+    assert jobs.load(job["id"])["message"] == "hello" and state["n"] == 4
+
+    monkeypatch.setattr(jobs.os, "replace", lambda a, b: (_ for _ in ()).throw(PermissionError(13, "in use")))
+    with pytest.raises(PermissionError):
+        jobs.write_job(job)
+    assert not list((tmp_path / "jobs" / job["id"]).glob("*.tmp"))
