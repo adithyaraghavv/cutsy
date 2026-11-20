@@ -54,7 +54,8 @@ def _bar(strip: np.ndarray) -> bool:
     return strip.mean() < 1.5 and strip.std() < 1.0
 
 
-def heuristic_qa(clip: Path, duration: float, hook_s: float, has_hook: bool) -> QAResult:
+def heuristic_qa(clip: Path, duration: float, hook_s: float, has_hook: bool, band: tuple = (0.06, 0.30),
+                 persistent: bool = False) -> QAResult:
     ts = qa_times(duration, hook_s)
     fr = [grab_gray(clip, t) for t in ts]
     rb, cb = int(H * 0.06), int(W * 0.03)
@@ -64,9 +65,12 @@ def heuristic_qa(clip: Path, duration: float, hook_s: float, has_hook: bool) -> 
         if centre.mean() > 15 and (_bar(f[:rb]) or _bar(f[-rb:]) or _bar(f[:, :cb]) or _bar(f[:, -cb:])):
             bars += 1
     no_bars = bars < 3
-    band = slice(int(H * 0.06), int(H * 0.30))
-    early, late = (fr[0][band] > 235).mean(), (fr[1][band] > 235).mean()
-    hook_ok = (not has_hook) or (early - late > 0.002)
+    sl = slice(int(H * band[0]), int(H * band[1]))
+    early, late = (fr[0][sl] > 235).mean(), (fr[1][sl] > 235).mean()
+    if persistent:   # headline box stays up the whole clip: bright box pixels must be there in every frame
+        hook_ok = (not has_hook) or all((f[sl] > 235).mean() > 0.02 for f in fr)
+    else:
+        hook_ok = (not has_hook) or (early - late > 0.002)
     not_blank = max(f[H // 4: 3 * H // 4].mean() for f in fr) > 4
     checks = {"no_black_bars": bool(no_bars), "hook_visible": bool(hook_ok), "not_blank": bool(not_blank)}
     notes = ["cropping / subject visibility are not assessed by the heuristic QA (needs visual review)"]
@@ -91,7 +95,7 @@ def write_chat_pack(clips: list[dict], out: Path, hook_s: float) -> Path | None:
                         "-vf", "tile=4x1", "-frames:v", "1", "-q:v", "4", str(qa / f"{clip.stem}_sheet.jpg")],
                        capture_output=True)
         shutil.rmtree(tmp, ignore_errors=True)
-        rows.append(f"- `{c['file']}`  hook: \"{c['hook']}\"  sheet: `qa/{clip.stem}_sheet.jpg`")
+        rows.append(f"- `{c['file']}`  title: \"{c.get('title') or c['hook']}\"  sheet: `qa/{clip.stem}_sheet.jpg`")
     p = out / "qa_prompt.md"
     p.write_text(f"""# Clip QA task
 
@@ -132,8 +136,8 @@ def load_chat_results(path: str | Path) -> dict[str, QAResult]:
         fix = r.get("fix") if isinstance(r.get("fix"), dict) else None
         if fix:
             fix = {k: v for k, v in fix.items() if k in ("fill", "hook")}
-            if "hook" in fix and (not isinstance(fix["hook"], str) or len(fix["hook"].split()) > 6):
-                raise ClipperError(f"{path}: fix.hook must be at most 6 words.")
+            if "hook" in fix and (not isinstance(fix["hook"], str) or not 1 <= len(fix["hook"].split()) <= 30):
+                raise ClipperError(f"{path}: fix.hook must be 1-30 words.")
         out[r["file"]] = QAResult(passed=bool(r["passed"]), backend="chat",
                                   notes=[str(i) for i in r.get("issues", [])], fix=fix or None)
     return out

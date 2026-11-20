@@ -191,7 +191,8 @@ def yt_access_token(log) -> str:
 
 
 def yt_metadata(clip: dict, privacy: str) -> dict:
-    hook = (clip.get("hook") or "").strip().title()
+    hook = (clip.get("title") or clip.get("hook") or "").strip()
+    hook = hook if clip.get("title") else hook.title()
     title = (f"{hook} #Shorts" if hook else "Clip #Shorts")[:100]
     j = clip.get("judge") or {}
     tags = [t.lstrip("#") for t in j.get("hashtags", [])]

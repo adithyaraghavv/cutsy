@@ -31,6 +31,13 @@ render:
   hook_fontsize: 88
   hook_wrap_chars: 16
   max_height_download: 1080
+  layout: blur           # blur = footage centred on a blurred background | split = facecam on top, gameplay below
+  facecam: null          # for split: [x, y, w, h] as fractions of the frame, e.g. [0.72, 0.55, 0.28, 0.45] (see --grid-frame)
+  split_top_px: 900      # height of the top (facecam) panel in the 1080x1920 canvas
+  title_style: box       # box = white box with black bold text (headline style) | outline = white text, black outline
+  title_fontsize: 54
+  title_wrap_chars: 28
+  title_seconds: 0       # 0 = headline stays for the whole clip
 
 captions:              # used with --captions (needs: pip install faster-whisper)
   model: base.en       # tiny.en (fastest) | base.en | small.en (more accurate) ; use e.g. "base" for other languages

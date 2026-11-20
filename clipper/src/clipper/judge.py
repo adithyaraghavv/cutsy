@@ -37,6 +37,7 @@ class Judgment:
     risk_flags: list
     backend: str = ""
     risk_assessed: bool = True
+    title: str = ""          # optional on-video headline (10-25 words); falls back to `hook`
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -69,6 +70,9 @@ def validate(raw: dict, item: Item) -> Judgment:
     hook = raw.get("hook")
     if not isinstance(hook, str) or not hook.strip() or len(hook.split()) > 6:
         p.append("hook must be 1-6 words")
+    title = raw.get("title", "")
+    if title not in (None, "") and (not isinstance(title, str) or not 2 <= len(title.split()) <= 30 or "\n" in title):
+        p.append("title (optional) must be one line of 2-30 words")
     cap = raw.get("caption")
     if not isinstance(cap, str) or not cap.strip():
         p.append("caption must be non-empty")
@@ -81,7 +85,8 @@ def validate(raw: dict, item: Item) -> Judgment:
     if p:
         raise ValueError("; ".join(p))
     return Judgment(id=item.id, score=score, reason=reason.strip(), best_start=bs, best_end=be,
-                    hook=hook.strip(), caption=cap.strip(), hashtags=tags, risk_flags=flags)
+                    hook=hook.strip(), caption=cap.strip(), hashtags=tags, risk_flags=flags,
+                    title=(title or "").strip())
 
 
 class Judge:
@@ -230,6 +235,7 @@ Write **{out}** containing ONLY a JSON list, one object per candidate (all {n}),
     "reason": "one line on why this moment works (or doesn't)",
     "best_start": 0.0,
     "best_end": 0.0,
+    "title": "headline shown on the video",
     "hook": "max six words",
     "caption": "short caption",
     "hashtags": ["#one", "#two", "#three", "#four", "#five"],
@@ -241,7 +247,11 @@ Write **{out}** containing ONLY a JSON list, one object per candidate (all {n}),
 Rules, all enforced by clipper (a bad entry is rejected and you will be asked to fix it):
 - `score` is 1-10. `best_start`/`best_end` are ABSOLUTE source seconds inside the candidate's window
   (see `window` in evidence.json) and the length is within `trim_length_s`.
-- `hook` is at most 6 words. `hashtags` is exactly 5 strings, each starting with `#`.
+- `title` is the headline burned into the video (white box, black bold text, whole clip): ONE sentence of
+  10-22 words that says what is happening and why it matters, like a news headline for the moment; put 3-5 key
+  words in CAPS for emphasis (e.g. "He is OFFICIALLY the FIRST person to COMPLETE the whole game in 7 hours");
+  no emoji (put emoji in `caption`); no spoilers you cannot see in the evidence.
+- `hook` is at most 6 words (a short fallback). `hashtags` is exactly 5 strings, each starting with `#`.
 - `risk_flags` uses only: spoilers, cutscenes, copyright, profanity (empty list if none seen).
 
 ## Candidates

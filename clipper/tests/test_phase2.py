@@ -230,10 +230,10 @@ def test_chat_qa_pack_and_results_apply_fix_once(landscape, tmp_path, cfg2):
                                               "fix": {"fill": True, "hook": "SHORTER HOOK"}}]))
     res = pipeline.apply_qa_results(str(landscape), out=out, cfg=cfg2, qa_results=str(out / "qa.json"), log=QUIET)
     c = res["clips"][0]
-    assert c["hook"] == "SHORTER HOOK" and c["fill"] is True and c["rerendered"]
+    assert c["title"] == "SHORTER HOOK" and c["fill"] is True and c["rerendered"]
     assert c["qa"][-1]["backend"] == "chat" and "hook too small" in (out / "report.md").read_text()
-    (out / "qa.json").write_text(json.dumps([{"file": "clip_1.mp4", "passed": False, "fix": {"hook": "ONE TWO THREE FOUR FIVE SIX SEVEN"}}]))
-    with pytest.raises(ClipperError, match="at most 6 words"):
+    (out / "qa.json").write_text(json.dumps([{"file": "clip_1.mp4", "passed": False, "fix": {"hook": " ".join(["WORD"] * 31)}}]))
+    with pytest.raises(ClipperError, match="1-30 words"):
         pipeline.apply_qa_results(str(landscape), out=out, cfg=cfg2, qa_results=str(out / "qa.json"), log=QUIET)
 
 

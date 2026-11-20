@@ -56,6 +56,18 @@ Output in `--out` (default `out/`, git-ignored):
 4. **Render** - blurred background + centered footage for landscape; scale-crop for portrait. A hook
    (Phase 1: chapter/title words; Phase 2: Claude) shows for the first 2.6 s via `drawtext` + `textfile`.
 
+## Look: headline box and facecam split
+
+Clips use a white box with black bold text (a one-sentence headline, kept on screen for the whole clip). Claude writes
+it via the `title` field of its judgments; without Claude the short hook is used. Emoji can't be burned in, so put them
+in the caption. Facecam layout (like many Shorts): find the webcam rectangle, then split the frame:
+
+```bash
+clipper ".clipper-cache\<id>\video_600-900.mp4" --grid-frame 30 --out grid     # writes grid/grid.png with a 10% grid
+clipper URL --scan --facecam 0.72,0.55,0.28,0.45                                   # x,y,w,h as fractions of the frame
+```
+`render.title_style: outline` in `config.yaml` brings back the old outlined text.
+
 ## Scan mode: find the best moments of a whole stream
 
 ```bash

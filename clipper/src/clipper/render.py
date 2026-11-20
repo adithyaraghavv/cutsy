@@ -17,18 +17,63 @@ def wrap_hook(text: str, width: int) -> str:
     return "\n".join(textwrap.wrap(text, width=width, break_long_words=True)) or ""
 
 
+def wrap_title(text: str, width: int) -> str:
+    """Headline text keeps its own capitalisation (key words in CAPS are the emphasis)."""
+    text = " ".join(text.split())
+    return "\n".join(textwrap.wrap(text, width=width, break_long_words=True)) or ""
+
+
 def _esc_path(p: str) -> str:
     """Escape a filesystem path for use inside an ffmpeg filter option value."""
     p = p.replace("\\", "/")
     return p.replace(":", r"\:").replace("'", r"\'")
 
 
+def effective_layout(media: Media, cfg: dict, fill: bool) -> str:
+    r = cfg["render"]
+    if media.height > media.width or fill:
+        return "fill"
+    if r.get("layout") == "split" and r.get("facecam"):
+        return "split"
+    return "blur"
+
+
+def _facecam(cfg: dict) -> tuple[float, float, float, float]:
+    fc = cfg["render"].get("facecam")
+    try:
+        x, y, w, h = (float(v) for v in fc)
+    except (TypeError, ValueError):
+        raise ClipperError("facecam must be four numbers x,y,w,h (fractions of the frame), e.g. 0.72,0.55,0.28,0.45") from None
+    if not (0 <= x < 1 and 0 <= y < 1 and 0.05 <= w <= 1 and 0.05 <= h <= 1 and x + w <= 1.001 and y + h <= 1.001):
+        raise ClipperError("facecam x,y,w,h must be fractions between 0 and 1 and stay inside the frame.")
+    return x, y, w, h
+
+
+def title_band(cfg: dict, layout: str) -> tuple[float, float]:
+    """Vertical band (fractions of the height) where the headline sits; used by QA."""
+    if cfg["render"].get("title_style", "box") == "box" and layout == "split":
+        t = int(cfg["render"]["split_top_px"]) / int(cfg["render"]["height"])
+        return max(0.0, t - 0.12), min(1.0, t + 0.10)
+    return 0.06, 0.32
+
+
 def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool, ass: str | None = None) -> str:
     r = cfg["render"]
     W, H, fps = int(r["width"]), int(r["height"]), int(r["fps"])
-    portrait = media.height > media.width
-    if portrait or fill:
+    layout = effective_layout(media, cfg, fill)
+    top_h = int(r["split_top_px"])
+    if layout == "fill":
         chain = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1"
+    elif layout == "split":
+        x, y, w, h = _facecam(cfg)
+        bot_h = H - top_h
+        chain = (
+            f"[0:v]split=2[camsrc][gamesrc];"
+            f"[camsrc]crop=w=trunc(iw*{w}/2)*2:h=trunc(ih*{h}/2)*2:x=iw*{x}:y=ih*{y},"
+            f"scale={W}:{top_h}:force_original_aspect_ratio=increase,crop={W}:{top_h},setsar=1[cam];"
+            f"[gamesrc]scale={W}:{bot_h}:force_original_aspect_ratio=increase,crop={W}:{bot_h},setsar=1[game];"
+            f"[cam][game]vstack=inputs=2"
+        )
     else:
         # Blurred full-frame background, sharp gameplay centred on top.
         # Blur is computed on a small copy and scaled up (fast, smooth).
@@ -45,14 +90,22 @@ def build_filter(media: Media, cfg: dict, textfile: str | None, fill: bool, ass:
         fd = f":fontsdir='{_esc_path(str(Path(font).parent))}'" if font else ""
         chain += f",subtitles=filename='{_esc_path(ass)}'{fd}"
     if textfile:
-        font = find_bold_font()
+        box = r.get("title_style", "box") == "box"
+        font = find_bold_font(prefer_title=box)
         dt = [f"textfile='{_esc_path(textfile)}'"]
         if font:
             dt.append(f"fontfile='{_esc_path(font)}'")
-        size = int(r["hook_fontsize"])
-        dt += [f"fontsize={size}", "fontcolor=white", "borderw=7", "bordercolor=black",
-               "line_spacing=12", "x=(w-text_w)/2", f"y=h*0.10",
-               f"enable='between(t,0,{float(r['hook_seconds'])})'"]
+        if box:   # headline style: white box, black bold text, centred on the seam of the split (or near the top)
+            y = f"{top_h}-text_h/2" if layout == "split" else "h*0.12"
+            dt += [f"fontsize={int(r['title_fontsize'])}", "fontcolor=black", "box=1", "boxcolor=white@0.96",
+                   "boxborderw=26", "line_spacing=10", "x=(w-text_w)/2", f"y={y}"]
+            secs = float(r.get("title_seconds", 0) or 0)
+            if secs > 0:
+                dt.append(f"enable='between(t,0,{secs})'")
+        else:
+            dt += [f"fontsize={int(r['hook_fontsize'])}", "fontcolor=white", "borderw=7", "bordercolor=black",
+                   "line_spacing=12", "x=(w-text_w)/2", "y=h*0.10",
+                   f"enable='between(t,0,{float(r['hook_seconds'])})'"]
         chain += ",drawtext=" + ":".join(dt)
     chain += ",format=yuv420p[v]"
     return chain
@@ -73,7 +126,10 @@ def render_clip(media: Media, start_abs: float, end_abs: float, out_path: Path, 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="clipper_") as td:
         textfile = None
-        wrapped = wrap_hook(hook, int(r["hook_wrap_chars"])) if hook else ""
+        if r.get("title_style", "box") == "box":
+            wrapped = wrap_title(hook, int(r["title_wrap_chars"])) if hook else ""
+        else:
+            wrapped = wrap_hook(hook, int(r["hook_wrap_chars"])) if hook else ""
         if wrapped:
             tf = Path(td) / "hook.txt"
             tf.write_text(wrapped, encoding="utf-8")

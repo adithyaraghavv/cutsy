@@ -14,6 +14,8 @@ DEFAULTS: dict = {
         "width": 1080, "height": 1920, "fps": 30, "crf": 21, "audio_bitrate": "160k",
         "loudness_lufs": -14, "hook_seconds": 2.6, "hook_fontsize": 88,
         "hook_wrap_chars": 16, "max_height_download": 1080,
+        "layout": "blur", "facecam": None, "split_top_px": 900,
+        "title_style": "box", "title_fontsize": 54, "title_wrap_chars": 28, "title_seconds": 0,
     },
     "captions": {"model": "base.en", "language": "en", "chunk_words": 2, "fontsize": 96,
                  "margin_v": 430, "highlight_bgr": "00D7FF"},

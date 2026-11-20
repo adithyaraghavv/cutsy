@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--transcribe", action="store_true",
                    help="with --scan: transcribe candidates to find reactions and write titles from speech (needs faster-whisper)")
     p.add_argument("--no-chat", action="store_true", help="skip downloading the live-chat replay (much faster for very long streams)")
+    p.add_argument("--layout", choices=["blur", "split"], default=None,
+                   help="blur: footage centred on a blurred background (default). split: facecam on top, gameplay below (needs --facecam)")
+    p.add_argument("--facecam", default=None, metavar="X,Y,W,H",
+                   help="facecam rectangle as fractions of the frame, e.g. 0.72,0.55,0.28,0.45 (turns on --layout split)")
+    p.add_argument("--grid-frame", type=float, default=None, metavar="SECONDS",
+                   help="write out/grid.png (a frame with a % grid) from a LOCAL video file so you can read off --facecam numbers")
     p.add_argument("--config", default=None, help="path to config.yaml")
     p.add_argument("--version", action="version", version=f"clipper {__version__}")
     return p
@@ -59,6 +65,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.budget_usd <= 0:
             raise ClipperError("--budget-usd must be greater than 0.")
         cfg = config.load(args.config)
+        if args.facecam:
+            try:
+                cfg["render"]["facecam"] = [float(v) for v in args.facecam.split(",")]
+            except ValueError:
+                raise ClipperError("--facecam must be four numbers like 0.72,0.55,0.28,0.45") from None
+            cfg["render"]["layout"] = args.layout or "split"
+        elif args.layout == "split":
+            raise ClipperError("--layout split needs --facecam X,Y,W,H (use --grid-frame to find the numbers).")
+        elif args.layout:
+            cfg["render"]["layout"] = args.layout
+        if args.grid_frame is not None:
+            from . import grid
+            print(f"Wrote {grid.write(args.source, args.grid_frame, Path(args.out))}\nOpen it: the numbers are % of the width (top) and height (left).")
+            return 0
         out = Path(args.out)
         if args.qa_results:
             pipeline.apply_qa_results(args.source, out=out, cfg=cfg, qa_results=args.qa_results)

@@ -31,13 +31,22 @@ _CANDIDATES = {
 }
 
 
-def find_bold_font() -> str | None:
-    """Return a path to a bold font, or None (ffmpeg then uses its default)."""
+_TITLE_FIRST = {
+    "win32": [r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\segoeuib.ttf"],
+    "darwin": ["/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf"],
+    "linux": ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+              "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"],
+}
+
+
+def find_bold_font(prefer_title: bool = False) -> str | None:
+    """Return a path to a bold font, or None (ffmpeg then uses its default).
+    prefer_title: favour an Arial-style bold (headline box) over a display font like Impact."""
     env = os.environ.get("CLIPPER_FONT")
     if env and Path(env).is_file():
         return env
     key = "win32" if sys.platform.startswith("win") else "darwin" if sys.platform == "darwin" else "linux"
-    for p in _CANDIDATES[key]:
+    for p in (_TITLE_FIRST[key] if prefer_title else []) + _CANDIDATES[key]:
         if Path(p).is_file():
             return p
     if shutil.which("fc-match"):

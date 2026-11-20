@@ -9,7 +9,7 @@ from . import captions as cap_mod, evidence, ingest, judge as judge_mod, qa as q
 from . import scan as scan_mod
 from . import trends as trends_mod
 from .errors import ClipperError
-from .render import render_clip
+from .render import effective_layout, render_clip, title_band
 
 
 def _cand_to_dict(c: cand.Candidate) -> dict:
@@ -73,8 +73,17 @@ def _words_for(media, it, cfg):
     return cap_mod.transcribe_window(media, it.cand.start_s, it.cand.end_s, cfg, key)
 
 
+def _drawn(c: dict) -> str:
+    """The text burned into the video: the headline `title` if there is one, else the short hook."""
+    return c.get("title") or c["hook"]
+
+
 def _heuristic_qa(media, clip, c, cfg):
-    return qa_mod.heuristic_qa(clip, c["end_s"] - c["start_s"], float(cfg["render"]["hook_seconds"]), bool(c["hook"]))
+    r = cfg["render"]
+    layout = effective_layout(media, cfg, bool(c.get("fill")))
+    persistent = r.get("title_style", "box") == "box" and not float(r.get("title_seconds", 0) or 0)
+    return qa_mod.heuristic_qa(clip, c["end_s"] - c["start_s"], float(r["hook_seconds"]), bool(_drawn(c)),
+                               band=title_band(cfg, layout), persistent=persistent)
 
 
 def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: dict,
@@ -176,23 +185,24 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         if captions:
             cw = cap_mod.slice_words(W(it), j.best_start, j.best_end)
             log(f"    captions: {len(cw)} words")
-        end = _render_one(M(it), j, out, name, j.hook, fill, cfg, hook_s, cw)
+        end = _render_one(M(it), j, out, name, j.title or j.hook, fill, cfg, hook_s, cw)
         c = {"file": name, "id": it.id, "start_s": round(j.best_start, 2), "end_s": round(end, 2),
-             "score": round(it.cand.score, 4), "hook": j.hook, "fill": fill,
+             "score": round(it.cand.score, 4), "hook": j.hook, "title": j.title, "fill": fill,
              "signals": {a: round(b, 3) for a, b in it.cand.breakdown.items()},
              "judge": j.to_dict(), "qa": [], "rerendered": False, "caption_words": cw or [],
              "link": _link(media, j.best_start),
              "section": ({"path": str(sec[it.id].path), "offset": sec[it.id].offset} if it.id in sec else None)}
         if qa_name != "none":
-            q = _heuristic_qa(media, out / name, c, cfg)
+            q = _heuristic_qa(M(it), out / name, c, cfg)
             c["qa"].append({**q.to_dict()})
             if not q.passed and q.fix:
                 log(f"    QA failed {q.checks}; re-rendering once with fix {q.fix}")
                 c["fill"] = q.fix.get("fill", c["fill"])
-                c["hook"] = q.fix.get("hook", c["hook"])
-                _render_one(M(it), j, out, name, c["hook"], c["fill"], cfg, hook_s, c["caption_words"] or None)
+                if "hook" in q.fix:
+                    c["title"] = q.fix["hook"]
+                _render_one(M(it), j, out, name, _drawn(c), c["fill"], cfg, hook_s, c["caption_words"] or None)
                 c["rerendered"] = True
-                c["qa"].append(_heuristic_qa(media, out / name, c, cfg).to_dict())
+                c["qa"].append(_heuristic_qa(M(it), out / name, c, cfg).to_dict())
         clips.append(c)
 
     res = {"source": media.source, "video_id": media.video_id, "title": media.title, "judge": judge.name,
@@ -243,7 +253,8 @@ def apply_qa_results(source: str, *, out: Path, cfg: dict, qa_results: str, log=
         if not v.passed and v.fix:
             log(f"{c['file']}: Claude QA failed ({'; '.join(v.notes) or 'no detail'}); re-rendering once with {v.fix}")
             c["fill"] = v.fix.get("fill", c["fill"])
-            c["hook"] = v.fix.get("hook", c["hook"])
+            if "hook" in v.fix:
+                c["title"] = v.fix["hook"]
             j = judge_mod.Judgment(**{**c["judge"], "best_start": c["start_s"], "best_end": c["end_s"]})
             if c.get("section"):
                 sp = Path(c["section"]["path"])
@@ -251,7 +262,7 @@ def apply_qa_results(source: str, *, out: Path, cfg: dict, qa_results: str, log=
             else:
                 media = media or ingest.resolve(source, rng, cfg)
                 cm = media
-            _render_one(cm, j, out, c["file"], c["hook"], c["fill"], cfg, hook_s, c.get("caption_words") or None)
+            _render_one(cm, j, out, c["file"], _drawn(c), c["fill"], cfg, hook_s, c.get("caption_words") or None)
             c["rerendered"] = True
         elif not v.passed:
             log(f"{c['file']}: Claude QA failed but gave no fix; left as is. Issues: {'; '.join(v.notes)}")
