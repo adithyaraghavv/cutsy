@@ -68,6 +68,26 @@ def cand_words(media, c, cfg: dict) -> list[dict]:
     return cap_mod.transcribe_window(media, c.start_s, c.end_s, cfg, key)
 
 
+def diversify(cands: list, n: int, min_gap_s: float) -> list:
+    """Best-first selection that keeps chosen moments at least `min_gap_s` apart (a long hype stretch would
+    otherwise fill the whole list with near-duplicates). If there are too few spread-out moments, the best of
+    the skipped ones fill the remaining places."""
+    chosen: list = []
+    skipped: list = []
+    for c in sorted(cands, key=lambda x: -x.score):
+        if all(abs(c.start_s - k.start_s) >= min_gap_s for k in chosen):
+            chosen.append(c)
+        else:
+            skipped.append(c)
+        if len(chosen) >= n:
+            break
+    for c in skipped:
+        if len(chosen) >= n:
+            break
+        chosen.append(c)
+    return sorted(chosen, key=lambda x: -x.score)
+
+
 def find_moments(media, sig, window: float, n: int, cfg: dict, transcribe: bool, log) -> list:
     """Top moments across the whole stream, best first."""
     k = min(max(3 * n, n + 10), 60)
@@ -83,4 +103,7 @@ def find_moments(media, sig, window: float, n: int, cfg: dict, transcribe: bool,
             if i % 10 == 0:
                 log(f"  transcribed {i}/{len(cands)}")
         cands.sort(key=lambda x: -x.score)
-    return cands
+    gap = float(cfg.get("scan", {}).get("min_gap_s", 180))
+    spread = diversify(cands, max(n, 1), gap)
+    log(f"Scan: keeping {len(spread)} moments at least {gap:.0f}s apart")
+    return spread

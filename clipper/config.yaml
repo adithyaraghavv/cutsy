@@ -48,4 +48,7 @@ captions:              # used with --captions (needs: pip install faster-whisper
   margin_v: 430        # distance from bottom, keeps text above Reels/Shorts UI
   highlight_bgr: 00D7FF  # key-word colour in BGR hex (gold)
 
+scan:
+  min_gap_s: 180         # --scan keeps chosen moments at least this many seconds apart
+
 cache_dir: .clipper-cache

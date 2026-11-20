@@ -132,3 +132,25 @@ def test_scan_audio_only_has_no_motion_signal(landscape, tmp_path, cfg2):
     from clipper import signals
     sig = signals.analyze(m, cfg2)
     assert "motion" not in sig.raw and "audio_rms" in sig.raw
+
+
+def test_diversify_keeps_moments_apart_and_backfills():
+    mk = lambda s, sc: cand.Candidate(start_s=s, end_s=s + 40, score=sc, breakdown={}, peak_s=s + 10)
+    cs = [mk(100, 5), mk(150, 4.5), mk(200, 4), mk(1000, 2), mk(2000, 1)]
+    top3 = scan.diversify(cs, 3, 180)
+    assert sorted(c.start_s for c in top3) == [100, 1000, 2000]              # the 150 and 200 near-duplicates are skipped
+    top5 = scan.diversify(cs, 5, 180)                                         # not enough spread-out ones: backfill
+    assert len(top5) == 5 and top5[0].start_s == 100
+
+
+def test_heuristic_scores_separate_and_hooks_are_unique():
+    from clipper import evidence, judge
+    m = type("M", (), {"video_id": "v"})()
+    cs = [cand.Candidate(start_s=i * 500.0, end_s=i * 500.0 + 40, score=s, breakdown={}, peak_s=i * 500.0 + 10)
+          for i, s in enumerate([3.8, 3.2, 2.6, 2.0, 1.4])]
+    items = evidence.make_items(m, cs, 40, {})
+    out, _ = judge.HeuristicJudge().judge(items, {"niche": "gta6", "title": "X", "trends": {}})
+    scores = [out[it.id].score for it in items]
+    hooks = [out[it.id].hook for it in items]
+    assert scores == sorted(scores, reverse=True) and len(set(scores)) == 5 and max(scores) < 10
+    assert len(set(hooks)) == 5

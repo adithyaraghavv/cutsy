@@ -12,6 +12,7 @@ cost money should report spend through `Judge.cost_usd` so --budget-usd can stop
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -108,6 +109,7 @@ class HeuristicJudge(Judge):
     def judge(self, items, ctx):
         out = {}
         niche, title = ctx.get("niche"), ctx.get("title") or ""
+        used_hooks: set = set()
         trends = ctx["trends"]
         for it in items:
             c = it.cand
@@ -119,21 +121,23 @@ class HeuristicJudge(Judge):
             words = (ctx.get("words_by_item") or {}).get(it.id) or []
             from .scan import hook_from_words, quote_from_words
             spoken = hook_from_words(words) if words else None
+            if spoken in used_hooks:
+                spoken = None
             if spoken:
                 hook = spoken
             elif chap:
                 hook = " ".join(re.sub(r"[^\w' !?-]", " ", chap).split()[:6])
             else:
-                hook = self.TEMPLATES[(it.rank - 1) % len(self.TEMPLATES)]
-                if niche and len(niche.split()) <= 2 and it.rank % 2 == 1:
-                    hook = f"{niche.upper()} GOES CRAZY"
+                options = ([f"{niche.upper()} GOES CRAZY"] if niche and len(niche.split()) <= 2 else []) + self.TEMPLATES
+                hook = next((h for h in options[(it.rank - 1) % len(options):] + options if h not in used_hooks), options[0])
             tags: list[str] = []
             for t in ([f"#{re.sub(r'[^0-9a-zA-Z]', '', niche).lower()}"] if niche else []) + trends.get("hashtags", []) \
                     + [f"#{w.lower()}" for w in re.findall(r"[A-Za-z0-9]{4,}", title) if w.lower() not in TAG_STOP] + GENERIC_TAGS:
                 if len(t) > 1 and t.lower() not in [x.lower() for x in tags]:
                     tags.append(t)
+            used_hooks.add(hook)
             out[it.id] = Judgment(
-                id=it.id, score=round(max(1.0, min(10.0, 5 + 1.5 * c.score)), 1),
+                id=it.id, score=round(1 + 9 / (1 + math.exp(-(c.score - 2.0))), 1),
                 reason=f"Signal rank #{it.rank}: strongest audio/motion/crowd activity (score {c.score:.2f}). Not reviewed visually.",
                 best_start=round(bs, 2), best_end=round(bs + L, 2), hook=hook,
                 caption=(f'"{quote_from_words(words)}" - {title[:50]}' if words and quote_from_words(words)
