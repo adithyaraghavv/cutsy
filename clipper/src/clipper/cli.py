@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="facecam rectangle as fractions of the frame, e.g. 0.72,0.55,0.28,0.45 (turns on --layout split)")
     p.add_argument("--gameplay", default=None, metavar="X,Y,W,H",
                    help="with --facecam: region of the frame used for the gameplay panel (skips the webcam corner / black bars)")
+    p.add_argument("--preset", default=None, metavar="NAME",
+                   help="use a saved facecam/gameplay crop (see --save-preset); same as passing --facecam/--gameplay")
+    p.add_argument("--save-preset", default=None, metavar="NAME",
+                   help="save the --facecam/--gameplay you pass under this name, then exit")
     p.add_argument("--grid-frame", type=float, default=None, metavar="SECONDS",
                    help="write out/grid.png (a frame with a % grid) from a LOCAL video file so you can read off --facecam numbers")
     p.add_argument("--config", default=None, help="path to config.yaml")
@@ -69,8 +73,19 @@ def main(argv: list[str] | None = None) -> int:
             uploader.authorize_youtube(print)
             print("YouTube is authorised. Uploads can now run (from the CLI or the chat tools).")
             return 0
+        if args.save_preset:
+            from . import presets
+            key = presets.save(args.save_preset, args.facecam, args.gameplay)
+            print(f"Saved preset '{key}'. Use it with: clipper <url> --preset {key}")
+            return 0
         if not args.source:
             raise ClipperError("Give a video URL or file path (or use --auth youtube).")
+        if args.preset:
+            from . import presets
+            pr = presets.get(args.preset)
+            args.facecam = args.facecam or ",".join(f"{v:g}" for v in pr["facecam"])
+            if not args.gameplay and pr.get("gameplay"):
+                args.gameplay = ",".join(f"{v:g}" for v in pr["gameplay"])
         args.n = args.n if args.n is not None else (15 if args.scan else 3)
         args.window = args.window if args.window is not None else (40.0 if args.scan else 55.0)
         if args.n < 1 or args.window < 5:

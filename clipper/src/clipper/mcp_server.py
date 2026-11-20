@@ -42,7 +42,7 @@ def _err(e: ClipperError) -> dict:
 def start_clip_job(url: str, n: int = 3, niche: str | None = None, range: str | None = None,
                    window: float = 55.0, fill: bool = False, captions: bool = False, scan: bool = False,
                    transcribe: bool = False, facecam: str | None = None, gameplay: str | None = None,
-                   min_score: float = 0.0) -> dict:
+                   min_score: float = 0.0, preset: str | None = None) -> dict:
     """Start a background clipping job for a video URL (or local file path). Returns a job_id immediately.
 
     n: clips wanted (1-10). niche: topic like "gta6" (steers hooks/hashtags). range: "START-END" seconds, to analyse
@@ -50,12 +50,12 @@ def start_clip_job(url: str, n: int = 3, niche: str | None = None, range: str | 
     scan: analyse the WHOLE stream (audio, chat replay, most-replayed) and cut the best n moments (use n=10-15);
     transcribe: also read candidates' speech for reactions (needs faster-whisper).
     facecam/gameplay: "x,y,w,h" fractions of the frame for the split layout (defaults come from CLIPPER_FACECAM /
-    CLIPPER_GAMEPLAY). min_score: leave out candidates you scored below this (e.g. 4).
+    CLIPPER_GAMEPLAY). preset: name of a saved facecam/gameplay crop for a streamer (see clipper --save-preset). min_score: leave out candidates you scored below this (e.g. 4).
     Only use for streams the user has the streamer's written permission to clip. Live (unfinished) streams fail.
     """
     try:
         job = jobs.create(url, n=n, niche=niche, window=window, rng=range, fill=fill, captions=captions, judge="chat",
-                          scan=scan, transcribe=transcribe, facecam=facecam, gameplay=gameplay, min_score=min_score)
+                          scan=scan, transcribe=transcribe, facecam=facecam, gameplay=gameplay, min_score=min_score, preset=preset)
         jobs.launch(job)
     except ClipperError as e:
         return _err(e)

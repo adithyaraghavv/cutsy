@@ -66,7 +66,7 @@ def load(job_id: str) -> dict:
 
 def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, captions=False,
            judge="chat", shortlist=None, scan=False, transcribe=False,
-           facecam=None, gameplay=None, min_score=0.0) -> dict:
+           facecam=None, gameplay=None, min_score=0.0, preset=None) -> dict:
     source = (source or "").strip()
     if not source:
         raise ClipperError("Give a video URL or a local file path.")
@@ -80,6 +80,10 @@ def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, c
     if judge not in ("chat", "heuristic"):
         raise ClipperError("judge must be 'chat' or 'heuristic'.")
     trends = os.environ.get("CLIPPER_TRENDS") or ("trends.json" if Path("trends.json").is_file() else None)
+    if preset:
+        from . import presets
+        pr = presets.get(preset)
+        facecam, gameplay = facecam or pr["facecam"], gameplay or pr.get("gameplay")
     facecam = _rect(facecam or os.environ.get("CLIPPER_FACECAM"), "facecam")
     gameplay = _rect(gameplay or os.environ.get("CLIPPER_GAMEPLAY"), "gameplay")
     jid = uuid.uuid4().hex[:12]

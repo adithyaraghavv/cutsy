@@ -236,3 +236,97 @@ def test_min_score_leaves_out_low_scored_candidates(landscape, tmp_path, cfg2):
                       judge_name="chat", judgments=str(out / "judgments.json"), min_score=4, log=QUIET)
     assert [c["hook"] for c in r2["clips"]] == ["KEEP ME"]
     assert len(r2["not_selected"]) == len(ids) - 1
+
+
+def test_failed_section_is_retried_then_succeeds(landscape, tmp_path, cfg2, monkeypatch):
+    calls, boom = [], {"n": 0}
+    fake_ytdlp(monkeypatch, landscape, calls)
+    real = ingest._run_ytdlp
+
+    def flaky(args, check=True, show=False):
+        if "--download-sections" in args and boom["n"] < 2:
+            boom["n"] += 1
+            raise subprocess.CalledProcessError(1, args)
+        return real(args, check=check, show=show)
+    monkeypatch.setattr(ingest, "_run_ytdlp", flaky)
+    logs = []
+    m = ingest.download_section("https://www.youtube.com/watch?v=vidtest", "vidtest", 30, 42, cfg2, logs.append,
+                                _sleep=lambda s: None)
+    assert m.path.is_file() and boom["n"] == 2 and sum("retrying" in l for l in logs) == 2
+
+
+def _failing_sections(monkeypatch, landscape, which):
+    """Fake yt-dlp where the Nth distinct section (0-based) always fails, as a 403 would."""
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    real, seen = ingest._run_ytdlp, []
+
+    def run(args, check=True, show=False):
+        if "--download-sections" in args:
+            sec = args[args.index("--download-sections") + 1]
+            if sec not in seen:
+                seen.append(sec)
+            if which is None or seen.index(sec) in which:
+                raise subprocess.CalledProcessError(1, args)
+        return real(args, check=check, show=show)
+    monkeypatch.setattr(ingest, "_run_ytdlp", run)
+    monkeypatch.setattr(ingest.time, "sleep", lambda s: None)
+
+
+def test_section_that_never_downloads_is_skipped_not_fatal(landscape, tmp_path, cfg2, monkeypatch):
+    _failing_sections(monkeypatch, landscape, which={1})          # the 2nd moment is refused every time
+    logs = []
+    r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=4, window=12, rng=None, fill=False,
+                     out=tmp_path / "o", cfg=cfg2, scan=True, log=logs.append)
+    assert len(r["clips"]) >= 1                                   # the job carried on with what it had
+    assert any("failed to download after" in l for l in logs) and any("could not be downloaded" in l for l in logs)
+
+
+def test_all_sections_refused_gives_a_clear_error(landscape, tmp_path, cfg2, monkeypatch):
+    _failing_sections(monkeypatch, landscape, which=None)
+    with pytest.raises(Exception, match="None of the chosen moments could be downloaded"):
+        pipeline.run("https://www.youtube.com/watch?v=vidtest", n=2, window=12, rng=None, fill=False,
+                     out=tmp_path / "o", cfg=cfg2, scan=True, log=QUIET)
+
+
+def test_worker_log_survives_unencodable_characters(tmp_path, monkeypatch, capsys):
+    from clipper import worker
+
+    class Cp1252Out:
+        def __init__(self):
+            self.buf = []
+        def reconfigure(self, **kw):
+            self.enc = kw
+        def write(self, s):
+            s.encode("cp1252")                                    # what the Windows console does
+            self.buf.append(s)
+        def flush(self):
+            pass
+    out = Cp1252Out()
+    monkeypatch.setattr(worker.sys, "stdout", out)
+    worker._safe_streams()
+    assert out.enc["errors"] == "replace"
+
+
+def test_presets_save_and_use(tmp_path, monkeypatch):
+    from clipper import jobs, presets
+    monkeypatch.setenv("CLIPPER_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert presets.save("IShowSpeed", "0,0.42,0.205,0.23", "0.21,0,0.79,1") == "ishowspeed"
+    assert presets.names() == ["ishowspeed"]
+    monkeypatch.setenv("CLIPPER_JOBS_DIR", str(tmp_path / "jobs"))
+    f = tmp_path / "v.mp4"
+    f.write_bytes(b"x")
+    job = jobs.create(str(f), preset="ishowspeed")
+    assert job["params"]["facecam"] == [0, 0.42, 0.205, 0.23] and job["params"]["gameplay"] == [0.21, 0, 0.79, 1]
+    with pytest.raises(Exception, match="No preset named"):
+        presets.get("nobody")
+    with pytest.raises(Exception, match="facecam"):
+        presets.save("bad", "1,2,3")
+
+
+def test_cli_save_preset_and_use(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLIPPER_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert cli.main(["--save-preset", "speed", "--facecam", "0,0.42,0.205,0.23"]) == 0
+    assert "Saved preset 'speed'" in capsys.readouterr().out
+    assert cli.main(["x.mp4", "--preset", "nobody"]) != 0
+    assert "No preset named" in capsys.readouterr().err

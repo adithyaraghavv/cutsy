@@ -90,11 +90,17 @@ def _live_moments(source, media, cands, n, cfg, log) -> list:
     from . import visual
     min_motion = float(cfg.get("scan", {}).get("min_motion", 0.25))
     valid: list = []
+    failed = 0
     for c in cands:
         if len(valid) >= n:
             break
         log(f"[{len(valid) + 1}/{n}] moment {c.start_s:.0f}-{c.end_s:.0f}s")
-        m = ingest.download_section(source, media.video_id, c.start_s, c.end_s, cfg, log) if ingest.is_url(source) else media
+        try:
+            m = ingest.download_section(source, media.video_id, c.start_s, c.end_s, cfg, log) if ingest.is_url(source) else media
+        except ClipperError as e:
+            log(f"  skipped: {e}")
+            failed += 1
+            continue
         info = visual.liveliness(m.path, max(0.0, c.start_s - m.offset), c.end_s - c.start_s)
         why = visual.dead_reason(info, min_motion)
         if why:
@@ -102,7 +108,11 @@ def _live_moments(source, media, cands, n, cfg, log) -> list:
             continue
         valid.append((c, m))
     if len(valid) < n:
-        log(f"Only {len(valid)} live moments were found (asked for {n}).")
+        log(f"Only {len(valid)} live moments were found (asked for {n})."
+            + (f" {failed} moment(s) could not be downloaded and were skipped." if failed else ""))
+    if not valid and failed:
+        raise ClipperError("None of the chosen moments could be downloaded (YouTube kept refusing the links). "
+                           "Try again later, or use --range on a shorter part of the stream.")
     return valid
 
 

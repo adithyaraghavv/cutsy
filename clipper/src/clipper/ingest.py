@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -248,21 +249,34 @@ def resolve_scan(source: str, cfg: dict, log, chat: bool = True) -> Media:
                  heatmap=info.get("heatmap") or [], chat_times=chat_times, source=source, **pr)
 
 
-def download_section(source: str, video_id: str, start: float, end: float, cfg: dict, log) -> Media:
-    """Download one moment at full quality (<= max height), re-cut exactly; cached."""
+SECTION_TRIES = 3
+
+
+def download_section(source: str, video_id: str, start: float, end: float, cfg: dict, log,
+                     _sleep=time.sleep) -> Media:
+    """Download one moment at full quality (<= max height), re-cut exactly; cached.
+    A failed download (e.g. a 403 on an expired link, common on very long streams) is retried with a fresh link."""
     d = Path(cfg["cache_dir"]) / video_id
+    d.mkdir(parents=True, exist_ok=True)
     s, e = max(0.0, start - 1.0), end + 1.0
     target = d / f"sec_{int(s * 10)}-{int(e * 10)}.mp4"
     if not target.is_file():
         h = int(cfg["render"]["max_height_download"])
         fmt = f"bv*[height<={h}][vcodec^=avc1]+ba/bv*[height<={h}]+ba/b[height<={h}]/b"
         log(f"  downloading {s:.0f}-{e:.0f}s at <= {h}p ...")
-        try:
-            _run_ytdlp(["-f", fmt, "--merge-output-format", "mp4", "--no-playlist",
-                        "--download-sections", f"*{s:.1f}-{e:.1f}", "--force-keyframes-at-cuts",
-                        "-o", str(target.with_suffix(".%(ext)s")), source], show=True)
-        except subprocess.CalledProcessError:
-            raise ClipperError("Section download failed (see the yt-dlp messages above).") from None
+        args = ["-f", fmt, "--merge-output-format", "mp4", "--no-playlist",
+                "--download-sections", f"*{s:.1f}-{e:.1f}", "--force-keyframes-at-cuts",
+                "-o", str(target.with_suffix(".%(ext)s")), source]
+        for attempt in range(1, SECTION_TRIES + 1):
+            try:
+                _run_ytdlp(args, show=True)
+                break
+            except subprocess.CalledProcessError:
+                if attempt == SECTION_TRIES:
+                    raise ClipperError(f"Section {s:.0f}-{e:.0f}s failed to download after {SECTION_TRIES} tries "
+                                       "(see the yt-dlp messages above).") from None
+                log(f"  download failed, retrying with a fresh link ({attempt}/{SECTION_TRIES - 1}) ...")
+                _sleep(5 * attempt)
         if not target.is_file():
             raise ClipperError("Section download finished but the file wasn't found in the cache.")
     return Media(path=target, offset=s, video_id=video_id, source=source, **probe(target))

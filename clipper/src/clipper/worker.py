@@ -11,7 +11,17 @@ from . import config, jobs, pipeline
 from .errors import ClipperError
 
 
+def _safe_streams() -> None:
+    """Windows consoles use cp1252: a stream title with an emoji must not kill the job when it is logged."""
+    for st in (sys.stdout, sys.stderr):
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv=None) -> int:
+    _safe_streams()
     d = Path((argv or sys.argv[1:])[0]).resolve()
     jid = d.name
     job = jobs.load(jid)
@@ -32,7 +42,10 @@ def main(argv=None) -> int:
     threading.Thread(target=beat, daemon=True).start()
 
     def log(msg):
-        print(msg, flush=True)
+        try:
+            print(msg, flush=True)
+        except UnicodeEncodeError:
+            print(str(msg).encode("ascii", "replace").decode("ascii"), flush=True)
 
     p = job["params"]
     try:
