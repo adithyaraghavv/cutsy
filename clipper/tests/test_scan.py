@@ -206,3 +206,13 @@ def test_chat_judge_scan_makes_labelled_sheets(landscape, tmp_path, cfg2, monkey
     sheets = sorted((out / "judge_sheets").glob("sheet_*.jpg"))
     assert sheets and probe_json(sheets[0])["streams"][0]["width"] <= 1600
     assert "NO SIGNAL" in (out / "judge_prompt.md").read_text()
+
+
+def test_printed_resume_command_keeps_layout_options(landscape, tmp_path, cfg2, capsys):
+    cfg2["render"].update(layout="split", facecam=[0.05, 0.0, 0.2, 0.3], gameplay=[0.3, 0.05, 0.7, 0.9])
+    cfg2["scan"]["min_motion"] = 0
+    logs = []
+    pipeline.run(str(landscape), n=2, window=12, rng=None, fill=False, out=tmp_path / "o", cfg=cfg2, scan=True,
+                 judge_name="chat", log=logs.append)
+    text = "\n".join(logs)
+    assert "--facecam 0.05,0,0.2,0.3" in text and "--gameplay 0.3,0.05,0.7,0.9" in text and "--judgments" in text

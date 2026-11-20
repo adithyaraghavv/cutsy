@@ -35,7 +35,7 @@ def _save_state(out: Path, state: dict) -> None:
     (out / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False, transcribe=False, captions=False, chat=True) -> str:
+def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False, transcribe=False, captions=False, chat=True, cfg=None) -> str:
     parts = ["clipper", shlex.quote(source), "--n", str(n), "--window", f"{window:g}"]
     if rng:
         parts += ["--range", f"{rng[0]:g}-{rng[1]:g}"]
@@ -51,6 +51,11 @@ def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False
         parts.append("--captions")
     if not chat:
         parts.append("--no-chat")
+    r = (cfg or {}).get("render", {})
+    if r.get("facecam"):
+        parts += ["--facecam", ",".join(f"{v:g}" for v in r["facecam"])]
+        if r.get("gameplay"):
+            parts += ["--gameplay", ",".join(f"{v:g}" for v in r["gameplay"])]
     parts += ["--judge", judge_name, "--judgments", shlex.quote(str(Path(out) / "judgments.json")), "--out", shlex.quote(str(out))]
     return " ".join(parts)
 
@@ -185,7 +190,7 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
             if not (out / "evidence" / it.id / "contact.jpg").is_file():
                 tr = {it.id: cap_mod.transcript_text(W(it))} if have_words else None
                 evidence.write_pack(M(it), [it], out, window, tr)
-        resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name, scan, transcribe, captions, chat)
+        resume = _resume_cmd(source, n, window, rng, fill, niche, out, judge.name, scan, transcribe, captions, chat, cfg)
         prompt = judge_mod.write_prompt(out, pending, ctx, resume)
         sheets = evidence.write_sheets(out, pending)
         for pr in problems:
