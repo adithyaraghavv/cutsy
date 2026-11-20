@@ -39,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--privacy", choices=["private", "unlisted", "public"], default="private",
                    help="YouTube visibility for uploads (default: private)")
     p.add_argument("--upload-only", action="store_true", help="skip rendering; offer to upload the clips already in --out")
+    p.add_argument("--no-chat", action="store_true", help="skip downloading the live-chat replay (much faster for very long streams)")
     p.add_argument("--config", default=None, help="path to config.yaml")
     p.add_argument("--version", action="version", version=f"clipper {__version__}")
     return p
@@ -69,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         rng = ingest.parse_range(args.rng)
         res = pipeline.run(args.source, n=args.n, window=args.window, rng=rng, fill=args.fill, out=out,
                            cfg=cfg, judge_name=args.judge, judgments=args.judgments, shortlist=args.shortlist,
-                           niche=args.niche, trends_path=args.trends, qa_name=args.qa, captions=args.captions)
+                           niche=args.niche, trends_path=args.trends, qa_name=args.qa, captions=args.captions, chat=not args.no_chat)
         if args.upload and res.get("status") == "done":
             from . import uploader
             uploader.run_uploads(res, out, ["youtube", "instagram"] if args.upload == "both" else [args.upload],

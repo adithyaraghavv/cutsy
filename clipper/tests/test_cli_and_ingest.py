@@ -24,7 +24,7 @@ def _fake_ytdlp(monkeypatch, info):
     monkeypatch.setattr(ingest, "_ytdlp", lambda: "yt-dlp")
     calls = []
 
-    def run(args, check=True):
+    def run(args, check=True, show=False):
         calls.append(args)
         if "-J" in args:
             return subprocess.CompletedProcess(args, 0, json.dumps(info), "")

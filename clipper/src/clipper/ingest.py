@@ -87,9 +87,9 @@ def parse_range(text: str | None) -> tuple[float, float] | None:
     return float(m.group(1)), float(m.group(2))
 
 
-def resolve(source: str, rng: tuple[float, float] | None, cfg: dict) -> Media:
+def resolve(source: str, rng: tuple[float, float] | None, cfg: dict, log=None, chat: bool = True) -> Media:
     if is_url(source):
-        return _resolve_url(source, rng, cfg)
+        return _resolve_url(source, rng, cfg, log or (lambda *_: None), chat)
     p = Path(source).expanduser()
     if not p.is_file():
         raise ClipperError(
@@ -113,8 +113,11 @@ def _ytdlp() -> str:
     return p
 
 
-def _run_ytdlp(args: list[str], *, check=True) -> subprocess.CompletedProcess:
-    """Single seam for tests: all yt-dlp subprocess calls go through here."""
+def _run_ytdlp(args: list[str], *, check=True, show=False) -> subprocess.CompletedProcess:
+    """Single seam for tests: all yt-dlp subprocess calls go through here.
+    show=True lets yt-dlp print its own progress to the terminal (used for long downloads)."""
+    if show:
+        return subprocess.run([_ytdlp(), *args], text=True, check=check)
     return subprocess.run([_ytdlp(), *args], capture_output=True, text=True, check=check)
 
 
@@ -157,8 +160,9 @@ def parse_chat(path: Path) -> list[float]:
     return sorted(times)
 
 
-def _resolve_url(url: str, rng, cfg: dict) -> Media:
+def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
     _ytdlp()  # fail early with instructions
+    log("Fetching video info (can take a minute for very long streams)...")
     info = fetch_info(url)
     check_not_live(info)
     vid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(info.get("id") or hashlib.sha1(url.encode()).hexdigest()[:10]))
@@ -169,22 +173,23 @@ def _resolve_url(url: str, rng, cfg: dict) -> Media:
     tag = f"{int(rng[0])}-{int(rng[1])}" if rng else "full"
     target = d / f"video_{tag}.mp4"
     if not target.is_file():
+        log(f"Downloading {'minutes %d-%d' % (rng[0] // 60, rng[1] // 60) if rng else 'the full video'} (<= {cfg['render']['max_height_download']}p). yt-dlp progress follows...")
         h = int(cfg["render"]["max_height_download"])
         args = ["-f", f"bv*[height<={h}]+ba/b[height<={h}]/b", "--merge-output-format", "mp4",
                 "--no-playlist", "-o", str(target.with_suffix(".%(ext)s"))]
         if rng:
             args += ["--download-sections", f"*{rng[0]}-{rng[1]}", "--force-keyframes-at-cuts"]
         try:
-            _run_ytdlp([*args, url])
-        except subprocess.CalledProcessError as e:
-            msg = (e.stderr or "").strip().splitlines()
-            raise ClipperError(f"Download failed: {msg[-1] if msg else 'unknown error'}") from None
+            _run_ytdlp([*args, url], show=True)
+        except subprocess.CalledProcessError:
+            raise ClipperError("Download failed (see the yt-dlp messages above).") from None
         if not target.is_file():
             raise ClipperError("Download finished but the video file wasn't found in the cache.")
 
     chat_times: list[float] = []
     chat_file = next(d.glob("chat*.live_chat.json"), None)
-    if chat_file is None:
+    if chat_file is None and chat:
+        log("Fetching chat replay (skip with --no-chat; slow for very long streams)...")
         try:
             _run_ytdlp(["--skip-download", "--write-subs", "--sub-langs", "live_chat",
                         "--no-playlist", "-o", str(d / "chat"), url], check=False)

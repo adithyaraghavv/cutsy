@@ -71,11 +71,11 @@ def _heuristic_qa(media, clip, c, cfg):
 def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: dict,
         judge_name: str = "heuristic", judgments: str | None = None, shortlist: int | None = None,
         niche: str | None = None, trends_path: str | None = None, qa_name: str = "heuristic",
-        captions: bool = False, log=print) -> dict:
+        captions: bool = False, chat: bool = True, log=print) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     if captions:
         cap_mod.check_available()
-    media = ingest.resolve(source, rng, cfg)
+    media = ingest.resolve(source, rng, cfg, log=log, chat=chat)
     log(f"Source: {media.title or media.source}  ({media.duration:.0f}s, {media.width}x{media.height}"
         f"{'' if media.has_audio else ', no audio'})")
     judge = judge_mod.get_judge(judge_name)
