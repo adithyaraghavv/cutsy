@@ -122,7 +122,8 @@ the pipeline (subclass `Judge` in `judge.py`, register it in `JUDGES`).
 `python -m clipper.mcp_server` (stdio) exposes `start_clip_job`, `job_status`, `list_clips`, `approve_clip`, plus
 `get_evidence` and `submit_judgments` (how Claude in your chat judges candidates without an API key). Jobs run in
 detached background processes and live in `<jobs dir>/<id>/`, so they survive restarts and never block a tool call.
-`approve_clip` only records your approval; nothing is ever uploaded. Setup for Claude Desktop and Claude Code:
+Extra chat tools: `get_judge_sheets`, `get_clip_preview`, `open_review`, `upload_clip`. `approve_clip` records your approval and
+`upload_clip` (YouTube, private by default, once per clip, only for approved clips) does the upload. Setup for Claude Desktop and Claude Code:
 [docs/MCP-SETUP.md](docs/MCP-SETUP.md). The skill is [skill/SKILL.md](skill/SKILL.md).
 
 ### Optional uploader

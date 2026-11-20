@@ -78,6 +78,21 @@ def heuristic_qa(clip: Path, duration: float, hook_s: float, has_hook: bool, ban
     return QAResult(passed=all(checks.values()), backend="heuristic", checks=checks, notes=notes, fix=fix)
 
 
+def make_sheet(clip: Path, dest: Path, duration: float, hook_s: float) -> Path:
+    """4 frames of a rendered clip side by side (during the title, just after, mid, near the end)."""
+    ff = shutil.which("ffmpeg")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.parent / f"{dest.stem}_f"
+    tmp.mkdir(exist_ok=True)
+    for i, t in enumerate(qa_times(duration, hook_s), 1):
+        subprocess.run([ff, "-y", "-v", "error", "-ss", f"{t}", "-i", str(clip), "-frames:v", "1",
+                        "-vf", "scale=360:-2", "-q:v", "4", str(tmp / f"f{i}.jpg")], capture_output=True)
+    subprocess.run([ff, "-y", "-v", "error", "-framerate", "1", "-i", str(tmp / "f%d.jpg"),
+                    "-vf", "tile=4x1", "-frames:v", "1", "-q:v", "4", str(dest)], capture_output=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return dest
+
+
 def write_chat_pack(clips: list[dict], out: Path, hook_s: float) -> Path | None:
     ff = shutil.which("ffmpeg")
     qa = out / "qa"

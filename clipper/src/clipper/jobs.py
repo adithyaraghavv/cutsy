@@ -65,7 +65,8 @@ def load(job_id: str) -> dict:
 
 
 def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, captions=False,
-           judge="chat", shortlist=None, scan=False, transcribe=False) -> dict:
+           judge="chat", shortlist=None, scan=False, transcribe=False,
+           facecam=None, gameplay=None, min_score=0.0) -> dict:
     source = (source or "").strip()
     if not source:
         raise ClipperError("Give a video URL or a local file path.")
@@ -79,17 +80,57 @@ def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, c
     if judge not in ("chat", "heuristic"):
         raise ClipperError("judge must be 'chat' or 'heuristic'.")
     trends = os.environ.get("CLIPPER_TRENDS") or ("trends.json" if Path("trends.json").is_file() else None)
+    facecam = _rect(facecam or os.environ.get("CLIPPER_FACECAM"), "facecam")
+    gameplay = _rect(gameplay or os.environ.get("CLIPPER_GAMEPLAY"), "gameplay")
     jid = uuid.uuid4().hex[:12]
     (jobs_dir() / jid / "out").mkdir(parents=True)
     job = {"id": jid, "source": ingest.is_url(source) and source or str(Path(source).expanduser().resolve()),
            "params": {"n": int(n), "niche": niche or None, "window": float(window),
                       "range": list(r) if r else None, "fill": bool(fill), "captions": bool(captions),
-                      "judge": judge, "shortlist": shortlist, "scan": bool(scan), "transcribe": bool(transcribe), "trends": str(Path(trends).resolve()) if trends else None,
+                      "judge": judge, "shortlist": shortlist, "scan": bool(scan), "transcribe": bool(transcribe), "facecam": facecam, "gameplay": gameplay,
+                      "min_score": float(min_score), "trends": str(Path(trends).resolve()) if trends else None,
                       "judgments": None},
            "status": "queued", "message": "", "pending": [], "problems": [], "approvals": {},
            "resumes": 0, "created": _now(), "heartbeat": _now()}
     write_job(job)
     return job
+
+
+def _rect(v, name: str):
+    """'x,y,w,h' (fractions of the frame) -> [x, y, w, h] or None."""
+    if not v:
+        return None
+    try:
+        vals = [float(x) for x in (v.split(",") if isinstance(v, str) else v)]
+        x, y, w, h = vals
+    except (ValueError, TypeError):
+        raise ClipperError(f"{name} must be four numbers x,y,w,h like 0.05,0,0.20,0.30") from None
+    if not (0 <= x < 1 and 0 <= y < 1 and 0.05 <= w <= 1 and 0.05 <= h <= 1 and x + w <= 1.001 and y + h <= 1.001):
+        raise ClipperError(f"{name} x,y,w,h must be fractions between 0 and 1 and stay inside the frame.")
+    return vals
+
+
+def set_upload(job_id: str, clip: str, platform: str, **fields) -> dict:
+    job = load(job_id)
+    job.setdefault("uploads", {}).setdefault(clip, {}).setdefault(platform, {}).update(fields)
+    write_job(job)
+    return job["uploads"][clip][platform]
+
+
+def launch_upload(job_id: str, clip: str, platform: str, privacy: str) -> None:
+    """Upload in its own detached process (so a tool call never waits on a big upload)."""
+    d = job_path(job_id)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["CLIPPER_JOBS_DIR"] = str(jobs_dir())
+    kw: dict = {}
+    if sys.platform.startswith("win"):
+        kw["creationflags"] = 0x00000008 | 0x00000200
+    else:
+        kw["start_new_session"] = True
+    with open(d / "upload_log.txt", "ab") as log:
+        subprocess.Popen([sys.executable, "-m", "clipper.upload_worker", str(d), clip, platform, privacy], cwd=str(d),
+                         env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **kw)
 
 
 def launch(job: dict) -> None:

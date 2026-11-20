@@ -1,23 +1,29 @@
 """clipper MCP server (stdio). Jobs run in the background; no tool call blocks on a long stream.
 
 Tools:
-  start_clip_job(url, n, niche)   start a background job (returns immediately)
-  job_status(job_id)              progress / what to do next
-  get_evidence(job_id, candidate) contact sheet + signals for a candidate (Claude judges these)
-  submit_judgments(job_id, ...)   Claude's judgments (validated), then the job renders the clips
-  list_clips(job_id)              finished clips + report
-  approve_clip(job_id, clip)      record YOUR approval of a clip (never uploads anything)
+  start_clip_job(url, n, niche, ...)  start a background job (returns immediately)
+  job_status(job_id, wait_s)          progress / what to do next (optionally waits up to 45 s)
+  get_judge_sheets(job_id)            picture sheets of all candidates (Claude judges these)
+  get_evidence(job_id, candidate)     one candidate's contact sheet + signals
+  submit_judgments(job_id, ...)       Claude's judgments (validated), then the job renders the clips
+  list_clips(job_id)                  finished clips + report
+  get_clip_preview(job_id, clip)      4 frames of a finished clip as an image
+  open_review(job_id)                 open the review page (playable clips) in the user's browser
+  approve_clip(job_id, clip)          record the USER's approval of a clip
+  upload_clip(job_id, clip, ...)      upload an APPROVED clip (default private); needs one-time `clipper --auth youtube`
 stdout is the protocol channel: this module must never print.
 """
 from __future__ import annotations
 
 import json
+import time
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mcp.server.mcpserver import Image, MCPServer
 
-from . import jobs
+from . import jobs, qa
 from .errors import ClipperError
 
 server = MCPServer(
@@ -35,18 +41,21 @@ def _err(e: ClipperError) -> dict:
 @server.tool()
 def start_clip_job(url: str, n: int = 3, niche: str | None = None, range: str | None = None,
                    window: float = 55.0, fill: bool = False, captions: bool = False, scan: bool = False,
-                   transcribe: bool = False) -> dict:
+                   transcribe: bool = False, facecam: str | None = None, gameplay: str | None = None,
+                   min_score: float = 0.0) -> dict:
     """Start a background clipping job for a video URL (or local file path). Returns a job_id immediately.
 
     n: clips wanted (1-10). niche: topic like "gta6" (steers hooks/hashtags). range: "START-END" seconds, to analyse
     only part of a long stream. fill: crop to fill 9:16 instead of blurred bars. captions: burn in speech captions.
     scan: analyse the WHOLE stream (audio, chat replay, most-replayed) and cut the best n moments (use n=10-15);
     transcribe: also read candidates' speech for reactions (needs faster-whisper).
+    facecam/gameplay: "x,y,w,h" fractions of the frame for the split layout (defaults come from CLIPPER_FACECAM /
+    CLIPPER_GAMEPLAY). min_score: leave out candidates you scored below this (e.g. 4).
     Only use for streams the user has the streamer's written permission to clip. Live (unfinished) streams fail.
     """
     try:
         job = jobs.create(url, n=n, niche=niche, window=window, rng=range, fill=fill, captions=captions, judge="chat",
-                          scan=scan, transcribe=transcribe)
+                          scan=scan, transcribe=transcribe, facecam=facecam, gameplay=gameplay, min_score=min_score)
         jobs.launch(job)
     except ClipperError as e:
         return _err(e)
@@ -55,10 +64,16 @@ def start_clip_job(url: str, n: int = 3, niche: str | None = None, range: str | 
 
 
 @server.tool()
-def job_status(job_id: str) -> dict:
-    """Status of a job: queued | running | awaiting_judgments | done | failed, plus what to do next."""
+def job_status(job_id: str, wait_s: float = 0.0) -> dict:
+    """Status of a job: queued | running | awaiting_judgments | done | failed, plus what to do next.
+    wait_s (max 45): wait this long for a status change before answering, to save polling."""
     try:
         job = jobs.refresh(job_id)
+        end = time.time() + min(max(float(wait_s), 0.0), 45.0)
+        first = job["status"]
+        while job["status"] == first and job["status"] in jobs.ACTIVE and time.time() < end:
+            time.sleep(2)
+            job = jobs.refresh(job_id)
     except ClipperError as e:
         return _err(e)
     out = {"job_id": job_id, "status": job["status"], "message": job.get("message", ""),
@@ -66,14 +81,17 @@ def job_status(job_id: str) -> dict:
     if job["status"] == "awaiting_judgments":
         out["pending_candidates"] = job["pending"]
         out["problems_with_previous_submission"] = job.get("problems", [])
-        out["next"] = ("For each pending candidate id call get_evidence(job_id, candidate_id), look at the contact "
-                       "sheet, then call submit_judgments(job_id, judgments) with one entry per candidate.")
+        out["next"] = ("Call get_judge_sheets(job_id) to see all candidates (4 per image, ids and times labelled), judge "
+                       "them, then call submit_judgments(job_id, judgments) with one entry per candidate. "
+                       "(get_evidence(job_id, candidate_id) shows one candidate in more detail.)")
     elif job["status"] == "done":
-        out["next"] = "Call list_clips(job_id) and summarise the report for the user."
+        out["next"] = "Call list_clips(job_id), open_review(job_id), and summarise the clips for the user."
     elif job["status"] == "failed":
         out["next"] = "Tell the user the message above; do not retry blindly."
     else:
         out["next"] = "Still working. Poll again in 20-30 s."
+    if job.get("uploads"):
+        out["uploads"] = job["uploads"]
     return out
 
 
@@ -125,6 +143,58 @@ def submit_judgments(job_id: str, judgments: list[dict]) -> dict:
 
 
 @server.tool()
+def get_judge_sheets(job_id: str) -> list:
+    """Picture sheets of ALL pending candidates (4 per image: 8 frames each, id and time window labelled above each).
+    Judge from these, then call submit_judgments. Far cheaper than looking at candidates one by one."""
+    try:
+        job = jobs.load(job_id)
+        if job["status"] != "awaiting_judgments":
+            return [json.dumps({"error": f"Job is '{job['status']}', not awaiting_judgments."})]
+        d = jobs.job_path(job_id) / "out"
+        sheets = sorted((d / "judge_sheets").glob("sheet_*.jpg"))
+        wins = []
+        for cid in job.get("pending", []):
+            ev = json.loads((d / "evidence" / cid / "evidence.json").read_text(encoding="utf-8"))
+            w = ev["window"]
+            wins.append({"id": cid, "start_s": w["start_s"], "end_s": w["end_s"], "trim_length_s": ev["trim_length_s"],
+                         "signals": ev["signals_mean_z"], "transcript": ev.get("transcript")})
+        prompt = (d / "judge_prompt.md").read_text(encoding="utf-8")
+    except (ClipperError, OSError, json.JSONDecodeError, KeyError) as e:
+        return [json.dumps({"error": str(e)})]
+    return [*[Image(path=str(p)) for p in sheets], json.dumps(wins, indent=1),
+            "Judging rules (output schema and limits):\n\n" + prompt]
+
+
+@server.tool()
+def get_clip_preview(job_id: str, clip: str) -> list:
+    """4 frames of a finished clip as one image (during the headline, just after, mid-clip, near the end)."""
+    try:
+        res = jobs.clips_of(jobs.load(job_id)["id"])
+        c = next((x for x in (res or {}).get("clips", []) if x["file"] == clip), None)
+        if c is None:
+            return [json.dumps({"error": f"Unknown clip {clip!r}."})]
+        d = jobs.job_path(job_id) / "out"
+        sheet = qa.make_sheet(d / clip, d / "preview" / f"{Path(clip).stem}.jpg", c["end_s"] - c["start_s"], 2.6)
+    except (ClipperError, OSError) as e:
+        return [json.dumps({"error": str(e)})]
+    return [Image(path=str(sheet)), f"{clip}: {c.get('title') or c['hook']} ({c['end_s'] - c['start_s']:.0f} s)"]
+
+
+@server.tool()
+def open_review(job_id: str) -> dict:
+    """Open the review page (every clip playable, with title/caption/hashtags and copy buttons) in the user's browser."""
+    try:
+        jobs.load(job_id)
+        p = jobs.job_path(job_id) / "out" / "review.html"
+        if not p.is_file():
+            return {"error": "No review page yet; the job has not finished."}
+        opened = webbrowser.open(p.as_uri())
+    except ClipperError as e:
+        return _err(e)
+    return {"review_page": str(p), "opened_in_browser": bool(opened)}
+
+
+@server.tool()
 def list_clips(job_id: str) -> dict:
     """Finished clips (paths, times, hook, caption, hashtags, judge score/reason, QA) and the report text."""
     try:
@@ -151,7 +221,7 @@ def list_clips(job_id: str) -> dict:
 @server.tool()
 def approve_clip(job_id: str, clip: str) -> dict:
     """Record that the USER explicitly approved a clip (e.g. "clip_1.mp4"). Call only after the user says so.
-    This does not upload anything; uploading is a separate, opt-in module that is not part of this server."""
+    This alone uploads nothing; upload_clip does that."""
     try:
         job = jobs.refresh(job_id)
         res = jobs.clips_of(job_id)
@@ -163,7 +233,39 @@ def approve_clip(job_id: str, clip: str) -> dict:
     except ClipperError as e:
         return _err(e)
     return {"approved": clip, "uploaded": False,
-            "note": "Approval recorded. Nothing has been uploaded; clipper never uploads on its own."}
+            "note": "Approval recorded. Nothing has been uploaded yet; upload_clip does that, only when the user asks."}
+
+
+@server.tool()
+def upload_clip(job_id: str, clip: str, platform: str = "youtube", privacy: str = "private") -> dict:
+    """Upload a clip the USER has approved (approve_clip first). Runs in the background; check job_status 'uploads'.
+
+    Only call this after the user explicitly asked to post THIS clip to THIS platform. privacy: private (default) |
+    unlisted | public; use public only if the user said so. YouTube needs the one-time sign-in `clipper --auth youtube`.
+    Each clip is uploaded at most once per platform."""
+    try:
+        if platform not in ("youtube", "instagram"):
+            return {"error": "platform must be 'youtube' or 'instagram'."}
+        if privacy not in ("private", "unlisted", "public"):
+            return {"error": "privacy must be private, unlisted or public."}
+        job = jobs.refresh(job_id)
+        res = jobs.clips_of(job_id)
+        names = [c["file"] for c in (res or {}).get("clips", [])]
+        if clip not in names:
+            return {"error": f"Unknown clip {clip!r}. Available: {names}"}
+        if clip not in job.get("approvals", {}):
+            return {"error": "This clip has not been approved. Ask the user which clips to post; call approve_clip only "
+                             "after they say so, then upload_clip."}
+        prev = job.get("uploads", {}).get(clip, {}).get(platform)
+        if prev and prev.get("status") in ("queued", "running", "done"):
+            return {"already": prev, "note": "This clip is already uploaded or uploading to that platform."}
+        jobs.set_upload(job_id, clip, platform, status="queued", privacy=privacy,
+                        approved_at=job["approvals"][clip], queued=time.time(), error="")
+        jobs.launch_upload(job_id, clip, platform, privacy)
+    except ClipperError as e:
+        return _err(e)
+    return {"status": "queued", "clip": clip, "platform": platform, "privacy": privacy,
+            "next": "Upload runs in the background (usually under a minute). Poll job_status and read 'uploads'."}
 
 
 def main() -> None:

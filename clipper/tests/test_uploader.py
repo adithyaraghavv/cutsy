@@ -190,11 +190,13 @@ def test_cli_upload_end_to_end(env, monkeypatch, landscape, tmp_path, capsys):
     assert cli.main(["x", "--upload", "youtube", "--upload-only", "--out", "o"]) == 0
 
 
-def test_upload_never_reachable_from_mcp_or_worker_or_pipeline():
+def test_upload_is_only_reachable_through_the_approved_clip_path():
     root = Path(__file__).resolve().parents[1] / "src" / "clipper"
-    for name in ("mcp_server.py", "worker.py", "jobs.py", "pipeline.py"):
-        assert "uploader" not in (root / name).read_text(), name
-    assert "uploader" in (root / "cli.py").read_text()
+    for name in ("worker.py", "jobs.py", "pipeline.py", "mcp_server.py"):      # nothing imports the uploader directly
+        assert "uploader" not in (root / name).read_text().replace("upload_worker", "").replace("launch_upload", ""), name
+    assert "uploader" in (root / "upload_worker.py").read_text() and "uploader" in (root / "cli.py").read_text()
+    mcp = (root / "mcp_server.py").read_text()
+    assert "not been approved" in mcp and 'privacy: str = "private"' in mcp   # approval gate + private default
 
 
 def test_no_default_upload(landscape, tmp_path, monkeypatch):

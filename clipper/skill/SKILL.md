@@ -1,48 +1,55 @@
 ---
 name: clipper
-description: Turn a pasted YouTube or Twitch video link (or local video file) into upload-ready vertical 9:16 clips for Instagram Reels and YouTube Shorts using the clipper MCP server. Use when the user pastes a video URL and asks for clips, shorts, reels or highlights.
+description: Turn a pasted YouTube or Twitch video link (or local video file) into vertical 9:16 Shorts/Reels clips with real headlines and captions, show them for approval, and upload the approved ones to YouTube. Use when the user pastes a video URL and wants clips, shorts, reels or highlights.
 ---
 
-# clipper: video link -> vertical clips
+# clipper: link -> best moments -> your approval -> upload
 
-Uses the `clipper` MCP server (tools: `start_clip_job`, `job_status`, `get_evidence`, `submit_judgments`,
-`list_clips`, `approve_clip`). If those tools are missing, tell the user the clipper MCP server isn't
-registered and point them to `docs/MCP-SETUP.md`; do not try to emulate it.
+Uses the `clipper` MCP server (tools: `start_clip_job`, `job_status`, `get_judge_sheets`, `get_evidence`,
+`submit_judgments`, `list_clips`, `get_clip_preview`, `open_review`, `approve_clip`, `upload_clip`).
+If those tools are missing, tell the user the clipper MCP server isn't registered and point them to
+`docs/MCP-SETUP.md`; do not try to emulate it.
 
 ## Hard rules
-- Only clip streams the user has the streamer's **written permission** to clip. If the link isn't the user's
+- Only clip streams the user has the streamer's **written permission** to clip. If the link isn't clearly the user's
   own and they haven't said they have permission, ask once before starting.
-- **Never upload anything and never call `approve_clip` unless the user explicitly says to approve that clip.**
-  `approve_clip` only records approval; there is no automatic upload. If the user wants to post, tell them to run
-  `clipper ... --upload` themselves in a terminal (see docs/UPLOADER.md); you cannot upload for them.
-- A live stream that hasn't ended can't be clipped. If the job fails with that message, relay it and stop.
-- Never ask the user to paste API keys or passwords into the chat.
+- **Never call `approve_clip` or `upload_clip` unless the user has explicitly said which clip(s) to post and where.**
+  Approval is a clear statement such as "post clips 1 and 4 to YouTube". Silence, "looks good" or "nice" is not approval.
+- Upload **private** unless the user explicitly asks for unlisted or public. Never upload a clip twice.
+- A live stream that hasn't ended can't be clipped; if the job fails with that message, relay it and stop.
+- Never ask the user to paste API keys, tokens or passwords into the chat.
+- Judge only what the frames/transcript show. If you can't tell what is happening, say so and score low; never invent a story.
 
-## Steps
-1. **Start.** Call `start_clip_job(url, n, niche)`. Use `n=3` unless asked. Pass `niche` if the topic is clear
-   (e.g. "gta6"). For streams longer than ~1 hour, ask which part matters and pass `range="START-END"`
-   (seconds); analysing 8 hours at once is slow. Options: `fill=true` (crop to fill instead of blurred bars),
-   `captions=true` (burn in speech captions; needs faster-whisper on the server).
-2. **Poll.** Call `job_status(job_id)` every ~20-30 s. Tell the user it's running; long streams take minutes.
-   Stop on `done`, `failed` or `awaiting_judgments`. On `failed`, relay `message` plainly.
-3. **Judge (status `awaiting_judgments`).** For each id in `pending_candidates` call
-   `get_evidence(job_id, candidate_id)`. You get a contact sheet (8 frames, left-to-right then top-to-bottom,
-   in time order), signals, any transcript, and the judging rules. Look at the actual frames and judge only what
-   they show; if something can't be told from the evidence, say so in `reason`. Then call
-   `submit_judgments(job_id, judgments)` with one entry per candidate:
-   `{id, score 1-10, reason (one line), best_start, best_end, hook (<=6 words), caption, hashtags (exactly 5,
-   each starting with #), risk_flags}`. `best_start/best_end` are absolute seconds inside the candidate's
-   window, 45-60 s long (or the whole window if it is shorter). `risk_flags` uses only
-   spoilers / cutscenes / copyright / profanity (empty list if none seen). Be honest with scores: empty or
-   static candidates should score low. If `job_status` later reports `problems_with_previous_submission`,
-   fix just those entries and resubmit them.
-4. **Present.** When `done`, call `list_clips(job_id)`. Summarise the report briefly (do not paste it whole):
-   for each clip give the file path, time range, hook, caption, hashtags, judge score and reason, any risk flags
-   (flag spoilers/copyright prominently) and the QA result. Mention anything the heuristic QA can't check
-   (cropping, subject visibility) so the user previews the clip themselves. Offer to rerun with a different
-   range, `n`, `fill` or `captions`.
-5. **Approval.** Ask which clips (if any) the user approves. Only call `approve_clip` for clips they name.
-   Make clear that nothing has been uploaded.
+## Workflow
+1. **Start.** Call `start_clip_job(url, n=12, scan=true, window=40, min_score=4, niche=<topic if clear, e.g. "gta6">)`.
+   For one short video (under ~10 min) use `scan=false, n=3, window=55`. Layout (facecam/gameplay crop) comes from the
+   server's defaults; only pass `facecam`/`gameplay` if the user gives numbers. Optional: `transcribe=true` (reads speech;
+   needs faster-whisper on the user's PC). Tell the user it is running: a 9-hour stream can take an hour or more.
+2. **Wait.** Call `job_status(job_id, wait_s=40)` repeatedly (each call waits up to 40 s). Keep the user posted in one
+   short line every few polls. Stop on `awaiting_judgments`, `done` or `failed`. On `failed`, relay `message` plainly.
+3. **Judge** (status `awaiting_judgments`). Call `get_judge_sheets(job_id)`: you get a few images (4 candidates each, id and
+   time window labelled; 8 frames per candidate in time order) plus the rules. For EVERY candidate write one entry and call
+   `submit_judgments(job_id, judgments)`:
+   `{id, score 1-10, reason (one line), best_start, best_end, title, hook (<=6 words), caption, hashtags (exactly 5 with #),
+   risk_flags}`.
+   - Copy each `id` exactly. `best_start`/`best_end` = the candidate's window (when the window is 40 s that is the whole
+     window; otherwise 45-60 s inside it).
+   - `title` = the headline burned into the video: ONE sentence, 10-22 words, saying concretely what happens, 3-5 key words in
+     CAPS, no emoji. `caption` may contain emoji. `hook` is a short fallback.
+   - Score 1-3 and say why for: NO SIGNAL / pause menus / loading or settings screens / black or frozen pictures / nothing
+     happening / adult or sexual content (not postable) / anything you can't make sense of. Real action, reactions, funny or
+     dramatic moments score higher. `risk_flags` only from spoilers, cutscenes, copyright, profanity.
+   If `job_status` later lists `problems_with_previous_submission`, fix those entries and resubmit just them.
+4. **Present.** When `done`: `list_clips(job_id)`, then `open_review(job_id)` (opens the playable review page in the user's
+   browser) and `get_clip_preview` for the best 3-4 clips so the user sees how they look. Summarise per clip: file, time in
+   the source, on-video title, caption, hashtags, score and reason, risk flags (call out spoilers/copyright). Say honestly
+   what you could not check (audio, exact cropping).
+5. **Approval.** Ask which clips (if any) to post, to which platform (YouTube Shorts is set up) and the visibility
+   (default private). Wait for an explicit answer.
+6. **Upload.** For each clip the user named: `approve_clip(job_id, clip)` then `upload_clip(job_id, clip,
+   platform="youtube", privacy=<what they chose, default "private">)`. Then poll `job_status(job_id, wait_s=30)` and read
+   `uploads` until `done` (report the URL) or `failed` (relay `error`; if it says to run `clipper --auth youtube`, tell the
+   user to run that once in a terminal). Tell the user exactly what was uploaded and where.
 
 ## Tone
 Short, concrete updates. Say what you saw in the frames, not generic praise.

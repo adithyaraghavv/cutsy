@@ -1,5 +1,28 @@
 # Registering the clipper MCP server
 
+> **The full chat workflow** (paste a link -> clips -> approve -> upload) needs three one-time things on the PC that
+> runs Claude Code: the MCP server registered, your layout settings, and the YouTube sign-in. Windows quick start
+> (Command Prompt, inside `cutsy\clipper`, with the virtual environment active):
+>
+> ```bat
+> pip install mcp
+> setx CLIPPER_JOBS_DIR "C:\Users\YOU\clipper-jobs"
+> setx CLIPPER_FACECAM "0.05,0,0.20,0.30"
+> setx CLIPPER_GAMEPLAY "0.30,0.05,0.70,0.90"
+> setx YOUTUBE_OAUTH_CLIENT_ID "your-client-id"
+> setx YOUTUBE_OAUTH_CLIENT_SECRET "your-client-secret"
+> ```
+> Close and reopen the terminal (so the new variables exist), then:
+> ```bat
+> clipper --auth youtube
+> claude mcp add clipper --env PYTHONPATH="C:\path\to\cutsy\clipper\src" -- "C:\path\to\cutsy\clipper\.venv\Scripts\python.exe" -m clipper.mcp_server
+> mkdir "%USERPROFILE%\.claude\skills\clipper"
+> copy skill\SKILL.md "%USERPROFILE%\.claude\skills\clipper\SKILL.md"
+> ```
+> `setx` keeps the client id/secret in your Windows user environment instead of in Claude Code's config file.
+> **Leave the `upload_clip` tool on "ask" in Claude Code's permissions**: you then get an extra confirmation prompt for
+> every upload, on top of Claude asking you first. Uploads are private by default and happen at most once per clip.
+
 The server is a local **stdio** MCP server (`python -m clipper.mcp_server`, or the `clipper-mcp` command after
 `pip install -e .`). It is free: no API key, no per-use cost. Jobs run in background processes and are stored in
 a jobs folder, so they survive restarts and no tool call blocks on a long stream.

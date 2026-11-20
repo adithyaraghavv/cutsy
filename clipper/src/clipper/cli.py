@@ -15,7 +15,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Turn a long YouTube/Twitch VOD (URL or local file) into vertical 9:16 clips.",
         epilog="Only clip streams you have the streamer's written permission to clip.",
     )
-    p.add_argument("source", help="video URL or local file path")
+    p.add_argument("source", nargs="?", default=None, help="video URL or local file path")
+    p.add_argument("--auth", choices=["youtube"], default=None,
+                   help="one-time sign-in for uploads (opens your browser; needs YOUTUBE_OAUTH_CLIENT_ID/SECRET)")
     p.add_argument("--n", type=int, default=None, help="number of clips to render (default 3; 15 with --scan)")
     p.add_argument("--window", type=float, default=None, help="clip length in seconds (default 55; 40 with --scan)")
     p.add_argument("--range", dest="rng", metavar="START-END", help="analyse only this span, in seconds")
@@ -62,6 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.auth:
+            from . import uploader
+            uploader.authorize_youtube(print)
+            print("YouTube is authorised. Uploads can now run (from the CLI or the chat tools).")
+            return 0
+        if not args.source:
+            raise ClipperError("Give a video URL or file path (or use --auth youtube).")
         args.n = args.n if args.n is not None else (15 if args.scan else 3)
         args.window = args.window if args.window is not None else (40.0 if args.scan else 55.0)
         if args.n < 1 or args.window < 5:

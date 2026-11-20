@@ -1,8 +1,9 @@
 """OPTIONAL uploader: YouTube Shorts (YouTube Data API v3) and Instagram Reels (Instagram Graph API).
 
 Safety rules enforced here:
-  * runs only from the CLI with --upload; the MCP server and background worker never import this module
-  * needs an interactive terminal and a typed 'y' for EACH clip; there is no "yes to all"
+  * CLI: --upload needs an interactive terminal and a typed 'y' for EACH clip; there is no "yes to all"
+  * Chat/MCP: only upload_clip -> upload_worker, only for a clip the user approved (approve_clip), never the
+    clip/judge worker; default visibility is private; one upload per clip and platform
   * official APIs and OAuth/access tokens only: no scraping, no login automation, no passwords
   * credentials come from environment variables; tokens/secrets are never printed or logged
   * YouTube uploads default to PRIVATE; you must pass --privacy to make them unlisted/public
@@ -160,6 +161,11 @@ def _yt_authorize(cid: str, secret: str, log) -> str:
         "prompt": "consent", "state": state})
     log("Open this URL in your browser and approve access for YOUR Google account:\n  " + url)
     try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001 - the printed URL is the fallback
+        pass
+    try:
         code = _wait_for_code(srv, state)
     finally:
         srv.server_close()
@@ -176,12 +182,26 @@ def _yt_authorize(cid: str, secret: str, log) -> str:
     return tok["access_token"]
 
 
-def yt_access_token(log) -> str:
+AUTH_HELP = ("YouTube isn't authorised yet. Run this ONCE in a terminal (it opens your browser so you can approve "
+             "access with your own Google account):  clipper --auth youtube")
+
+
+def authorize_youtube(log=print) -> None:
+    """One-time interactive sign-in (OAuth loopback + PKCE). Saves only a refresh token, owner-only file."""
+    cid, secret = _env("YOUTUBE_OAUTH_CLIENT_ID"), _env("YOUTUBE_OAUTH_CLIENT_SECRET")
+    if not cid or not secret:
+        raise ClipperError(YT_HELP)
+    _yt_authorize(cid, secret, log)
+
+
+def yt_access_token(log, interactive: bool = True) -> str:
     cid, secret = _env("YOUTUBE_OAUTH_CLIENT_ID"), _env("YOUTUBE_OAUTH_CLIENT_SECRET")
     if not cid or not secret:
         raise ClipperError(YT_HELP)
     rt = _load_refresh_token()
     if not rt:
+        if not interactive:
+            raise ClipperError(AUTH_HELP)
         return _yt_authorize(cid, secret, log)
     data = urllib.parse.urlencode({"client_id": cid, "client_secret": secret, "refresh_token": rt,
                                    "grant_type": "refresh_token"}).encode()
@@ -201,8 +221,8 @@ def yt_metadata(clip: dict, privacy: str) -> dict:
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False}}
 
 
-def youtube_upload(path: Path, clip: dict, privacy: str, log) -> str:
-    token = yt_access_token(log)
+def youtube_upload(path: Path, clip: dict, privacy: str, log, interactive: bool = True) -> str:
+    token = yt_access_token(log, interactive)
     size = path.stat().st_size
     meta = json.dumps(yt_metadata(clip, privacy)).encode()
     st, hdrs, body = _http("POST", f"{YT_UPLOAD}?uploadType=resumable&part=snippet,status", data=meta, headers={

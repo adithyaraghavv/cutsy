@@ -38,11 +38,16 @@ def main(argv=None) -> int:
     try:
         cfg = config.load(None)
         cfg["cache_dir"] = str(jobs.jobs_dir() / ".cache")
+        if p.get("facecam"):
+            cfg["render"]["facecam"], cfg["render"]["layout"] = p["facecam"], "split"
+            if p.get("gameplay"):
+                cfg["render"]["gameplay"] = p["gameplay"]
         res = pipeline.run(
             job["source"], n=p["n"], window=p["window"], rng=tuple(p["range"]) if p["range"] else None,
             fill=p["fill"], out=d / "out", cfg=cfg, judge_name=p["judge"], judgments=p.get("judgments"),
             shortlist=p.get("shortlist"), niche=p.get("niche"), trends_path=p.get("trends"),
-            captions=p["captions"], scan=p.get("scan", False), transcribe=p.get("transcribe", False), log=log)
+            captions=p["captions"], scan=p.get("scan", False), transcribe=p.get("transcribe", False),
+            min_score=float(p.get("min_score", 0) or 0), log=log)
         job = jobs.load(jid)
         if res["status"] == "awaiting_judgments":
             job.update(status="awaiting_judgments", pending=res["pending"], problems=res.get("problems", []),
