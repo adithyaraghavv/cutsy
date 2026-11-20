@@ -21,7 +21,9 @@ If those tools are missing, tell the user the clipper MCP server isn't registere
 - Judge only what the frames/transcript show. If you can't tell what is happening, say so and score low; never invent a story.
 
 ## Workflow
-1. **Start.** Call `start_clip_job(url, n=12, scan=true, window=40, min_score=4, niche=<topic if clear, e.g. "gta6">)`.
+1. **Start.** Call `start_clip_job(url, n, scan=true, window, min_score=4, niche=<topic if clear, e.g. "gta6">)`.
+   **Use exactly the number of clips and clip length the user asked for** (e.g. "6 clips of 45 seconds" -> `n=6, window=45`);
+   only when they say nothing use the defaults `n=12, window=40`. Never replace a number the user gave.
    For one short video (under ~10 min) use `scan=false, n=3, window=55`. Layout (facecam/gameplay crop) comes from the
    server's defaults; only pass `facecam`/`gameplay` if the user gives numbers. Optional: `transcribe=true` (reads speech;
    needs faster-whisper on the user's PC). Tell the user it is running: a 9-hour stream can take an hour or more.
