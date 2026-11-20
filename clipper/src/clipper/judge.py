@@ -21,6 +21,7 @@ from .evidence import Item, length_limits
 
 RISK_FLAGS = ("spoilers", "cutscenes", "copyright", "profanity")
 GENERIC_TAGS = ["#shorts", "#reels", "#fyp", "#viral", "#clips"]
+TAG_STOP = set("playing first time this that with from your stream live full video game gameplay part episode reaction trailer official watch what when they them have been just like very into over under about after before again".split())
 TOL = 0.6
 
 
@@ -128,7 +129,7 @@ class HeuristicJudge(Judge):
                     hook = f"{niche.upper()} GOES CRAZY"
             tags: list[str] = []
             for t in ([f"#{re.sub(r'[^0-9a-zA-Z]', '', niche).lower()}"] if niche else []) + trends.get("hashtags", []) \
-                    + [f"#{w.lower()}" for w in re.findall(r"[A-Za-z0-9]{4,}", title)] + GENERIC_TAGS:
+                    + [f"#{w.lower()}" for w in re.findall(r"[A-Za-z0-9]{4,}", title) if w.lower() not in TAG_STOP] + GENERIC_TAGS:
                 if len(t) > 1 and t.lower() not in [x.lower() for x in tags]:
                     tags.append(t)
             out[it.id] = Judgment(
