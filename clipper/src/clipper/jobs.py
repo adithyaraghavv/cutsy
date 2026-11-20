@@ -45,6 +45,7 @@ def _now() -> float:
 
 
 WRITE_TRIES = 12
+MAX_CLIPS = 40
 
 
 def write_job(job: dict) -> None:
@@ -78,14 +79,14 @@ def load(job_id: str) -> dict:
 
 def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, captions=False,
            judge="chat", shortlist=None, scan=False, transcribe=False,
-           facecam=None, gameplay=None, min_score=0.0, preset=None) -> dict:
+           facecam=None, gameplay=None, min_score=0.0, preset=None, allow_repeats=False) -> dict:
     source = (source or "").strip()
     if not source:
         raise ClipperError("Give a video URL or a local file path.")
     if not ingest.is_url(source) and not Path(source).expanduser().is_file():
         raise ClipperError(f"File not found: {source} (and it isn't an http(s) URL).")
-    if not 1 <= int(n) <= 10:
-        raise ClipperError("n must be between 1 and 10.")
+    if not 1 <= int(n) <= MAX_CLIPS:
+        raise ClipperError(f"n must be between 1 and {MAX_CLIPS}.")
     if not 5 <= float(window) <= 120:
         raise ClipperError("window must be between 5 and 120 seconds.")
     r = ingest.parse_range(rng) if rng else None
@@ -104,7 +105,7 @@ def create(source: str, *, n=3, niche=None, window=55.0, rng=None, fill=False, c
            "params": {"n": int(n), "niche": niche or None, "window": float(window),
                       "range": list(r) if r else None, "fill": bool(fill), "captions": bool(captions),
                       "judge": judge, "shortlist": shortlist, "scan": bool(scan), "transcribe": bool(transcribe), "facecam": facecam, "gameplay": gameplay,
-                      "min_score": float(min_score), "trends": str(Path(trends).resolve()) if trends else None,
+                      "min_score": float(min_score), "allow_repeats": bool(allow_repeats), "trends": str(Path(trends).resolve()) if trends else None,
                       "judgments": None},
            "status": "queued", "message": "", "pending": [], "problems": [], "approvals": {},
            "resumes": 0, "created": _now(), "heartbeat": _now()}

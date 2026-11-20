@@ -168,7 +168,7 @@ def test_dead_screens_are_skipped_and_replaced(landscape, tmp_path, cfg2, monkey
     assert len(r["clips"]) == 1 and r["clips"][0]["start_s"] >= 24 and r["clips"][0]["end_s"] <= 48   # the moving part
     # with the filter on, only the live window survives even if more clips are asked for
     r2 = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=4, window=12, rng=None, fill=False,
-                      out=tmp_path / "o2", cfg=cfg2, scan=True, log=logs.append)
+                      out=tmp_path / "o2", cfg=cfg2, scan=True, allow_repeats=True, log=logs.append)
     assert 1 <= len(r2["clips"]) < 4
     assert any("skipped: frozen" in l for l in logs) and any("live moments were found" in l for l in logs)
 
@@ -375,3 +375,71 @@ def test_bucket_count_and_switch_off(cfg):
     assert scan.bucket_count(2 * 3600, 10, cfg) == 8
     cfg["scan"]["bucket_s"] = 0
     assert scan.bucket_count(23.7 * 3600, 10, cfg) == 1
+
+
+def _chat_line(t_ms, *runs):
+    return json.dumps({"replayChatItemAction": {"videoOffsetTimeMsec": str(t_ms), "actions": [{
+        "addChatItemAction": {"item": {"liveChatTextMessageRenderer": {"message": {"runs": [
+            ({"text": r} if isinstance(r, str) else {"emoji": {"emojiId": r[0]}}) for r in runs]}}}}}]}})
+
+
+def test_funny_chat_messages_are_found(tmp_path):
+    f = tmp_path / "chat.live_chat.json"
+    f.write_text("\n".join([
+        _chat_line(10_000, "nice play"), _chat_line(20_000, "LUL LUL"), _chat_line(21_000, "KEKW"),
+        _chat_line(22_000, ("\U0001F480",)), _chat_line(23_000, "this is so cringe"), _chat_line(30_000, "gg"),
+        _chat_line(31_000, "hahaha"), "not json", _chat_line(40_000, "skull issue"), ]))
+    assert ingest.parse_chat_funny(f) == [20.0, 21.0, 22.0, 23.0, 31.0]
+
+
+def test_funny_chat_becomes_a_signal_and_lifts_the_score(landscape, cfg):
+    from clipper import signals
+    media = ingest.Media(path=landscape, offset=0.0, **ingest.probe(landscape))
+    base = signals.analyze(media, cfg)
+    assert "chat_funny" not in base.raw
+    media.chat_funny = [30 + i * 0.2 for i in range(40)]            # a burst of laughing at ~30-38 s
+    sig = signals.analyze(media, cfg)
+    assert "chat_funny" in sig.raw
+    i = int(34 / 0.5)
+    assert sig.z["chat_funny"][i] > 2 and sig.combined[i] > base.combined[i]
+
+
+def test_ledger_skips_used_moments_and_allows_repeats(landscape, tmp_path, cfg2, monkeypatch):
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    url = "https://www.youtube.com/watch?v=vidtest"
+    r1 = pipeline.run(url, n=1, window=12, rng=None, fill=False, out=tmp_path / "a", cfg=cfg2, scan=True, log=QUIET)
+    assert len(r1["clips"]) == 1
+    from clipper import ledger
+    assert ledger.load(cfg2, "vidtest")                              # remembered
+    logs = []
+    with pytest.raises(Exception, match="No new moments"):
+        pipeline.run(url, n=1, window=12, rng=None, fill=False, out=tmp_path / "b", cfg=cfg2, scan=True, log=logs.append)
+    assert any("already cut into clips" in l for l in logs)
+    r3 = pipeline.run(url, n=1, window=12, rng=None, fill=False, out=tmp_path / "c", cfg=cfg2, scan=True,
+                      allow_repeats=True, log=QUIET)
+    assert len(r3["clips"]) == 1
+
+
+def test_ledger_learns_from_earlier_job_folders(tmp_path):
+    from clipper import ledger
+    jobs_root = tmp_path / "jobs"
+    (jobs_root / "j1" / "out").mkdir(parents=True)
+    (jobs_root / "j1" / "out" / "clips.json").write_text(json.dumps(
+        {"video_id": "abc", "clips": [{"start_s": 100, "end_s": 140}, {"start_s": 500, "end_s": 540}]}))
+    (jobs_root / "j2" / "out").mkdir(parents=True)
+    (jobs_root / "j2" / "out" / "clips.json").write_text(json.dumps({"video_id": "other", "clips": [{"start_s": 1, "end_s": 2}]}))
+    cfg = {"cache_dir": str(jobs_root / ".cache")}
+    assert ledger.seed_from_jobs(cfg, "abc") == 2
+    assert ledger.overlaps(120, 130, ledger.load(cfg, "abc")) and not ledger.overlaps(1000, 1040, ledger.load(cfg, "abc"))
+    assert ledger.load(cfg, "other") == []
+
+
+def test_clip_count_is_not_capped_at_ten(tmp_path, monkeypatch):
+    from clipper import jobs
+    monkeypatch.setenv("CLIPPER_JOBS_DIR", str(tmp_path / "jobs"))
+    f = tmp_path / "v.mp4"
+    f.write_bytes(b"x")
+    assert jobs.create(str(f), n=30)["params"]["n"] == 30
+    with pytest.raises(Exception, match="between 1 and 40"):
+        jobs.create(str(f), n=41)

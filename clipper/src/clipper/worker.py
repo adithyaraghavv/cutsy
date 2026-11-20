@@ -60,7 +60,7 @@ def main(argv=None) -> int:
             fill=p["fill"], out=d / "out", cfg=cfg, judge_name=p["judge"], judgments=p.get("judgments"),
             shortlist=p.get("shortlist"), niche=p.get("niche"), trends_path=p.get("trends"),
             captions=p["captions"], scan=p.get("scan", False), transcribe=p.get("transcribe", False),
-            min_score=float(p.get("min_score", 0) or 0), log=log)
+            min_score=float(p.get("min_score", 0) or 0), allow_repeats=bool(p.get("allow_repeats", False)), log=log)
         job = jobs.load(jid)
         if res["status"] == "awaiting_judgments":
             job.update(status="awaiting_judgments", pending=res["pending"], problems=res.get("problems", []),

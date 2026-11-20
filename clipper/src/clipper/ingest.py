@@ -38,6 +38,7 @@ class Media:
     chapters: list = field(default_factory=list)
     heatmap: list = field(default_factory=list)      # [{start_time,end_time,value}]
     chat_times: list = field(default_factory=list)   # absolute seconds
+    chat_funny: list = field(default_factory=list)   # times of chat messages reacting to something funny/cringe
     source: str = ""
 
 
@@ -163,6 +164,48 @@ def parse_chat(path: Path) -> list[float]:
     return sorted(times)
 
 
+# Chat messages that react to something funny or cringe (laughing emotes, skull/crying-laughing emoji, "cringe",
+# "clip it"). Used only to find WHERE chat is reacting; the messages themselves are never stored or shown.
+FUNNY_CHAT = re.compile(
+    r"(?<![a-z])(lul+w?|kekw?|omegalul|lmao+|lmfao+|rofl|lol+|ha(?:ha)+h?|hehe+|dead|i'?m dying|dying|"
+    r"bruh+|cring\w*|yikes|oof+|awkward|clip (?:it|that)|funny|hilarious|crying|pepelaugh|icant|i can'?t)(?![a-z])"
+    r"|[\U0001F602\U0001F923\U0001F480\U0001F62D\U0001F62C\U0001F974]", re.I)
+
+
+def _message_text(obj: dict) -> str:
+    """The plain text (runs + emoji) of a replayed chat message; '' if it isn't a text message."""
+    try:
+        acts = obj["replayChatItemAction"]["actions"]
+    except (KeyError, TypeError):
+        return ""
+    out: list[str] = []
+    for a in acts or []:
+        item = ((a.get("addChatItemAction") or {}).get("item") or {})
+        r = item.get("liveChatTextMessageRenderer") or item.get("liveChatPaidMessageRenderer") or {}
+        for run in (r.get("message") or {}).get("runs") or []:
+            if "text" in run:
+                out.append(str(run["text"]))
+            elif "emoji" in run:
+                e = run["emoji"]
+                out.append(str(e.get("emojiId") or " ".join(e.get("shortcuts") or [])))
+    return " ".join(out)
+
+
+def parse_chat_funny(path: Path) -> list[float]:
+    """Times (seconds) of chat messages that look like a reaction to something funny or cringe."""
+    times: list[float] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            obj = json.loads(line)
+            t = int(obj["replayChatItemAction"]["videoOffsetTimeMsec"]) / 1000.0
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            continue
+        txt = _message_text(obj)
+        if txt and FUNNY_CHAT.search(txt):
+            times.append(t)
+    return sorted(times)
+
+
 def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
     _ytdlp()  # fail early with instructions
     log("Fetching video info (can take a minute for very long streams)...")
@@ -190,13 +233,14 @@ def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
             raise ClipperError("Download finished but the video file wasn't found in the cache.")
 
     chat_times = _get_chat(d, url, log, chat)
+    chat_funny = _get_chat_funny(d)
 
     pr = probe(target)
     return Media(
         path=target, offset=rng[0] if rng else 0.0, video_id=vid,
         title=info.get("title") or "", description=info.get("description") or "",
         chapters=info.get("chapters") or [], heatmap=info.get("heatmap") or [],
-        chat_times=chat_times, source=url, **pr,
+        chat_times=chat_times, chat_funny=chat_funny, source=url, **pr,
     )
 
 
@@ -212,6 +256,11 @@ def _get_chat(d: Path, url: str, log, chat: bool) -> list[float]:
             pass
         chat_file = next(d.glob("chat*.live_chat.json"), None)
     return parse_chat(chat_file) if chat_file else []
+
+
+def _get_chat_funny(d: Path) -> list[float]:
+    chat_file = next(d.glob("chat*.live_chat.json"), None)
+    return parse_chat_funny(chat_file) if chat_file else []
 
 
 def _cache_dir(cfg: dict, info: dict, url: str) -> tuple[str, Path]:
@@ -243,10 +292,11 @@ def resolve_scan(source: str, cfg: dict, log, chat: bool = True) -> Media:
         if audio is None:
             raise ClipperError("Audio download finished but the file wasn't found in the cache.")
     chat_times = _get_chat(d, source, log, chat)
+    chat_funny = _get_chat_funny(d)
     pr = probe(audio, need_video=False)
     return Media(path=audio, offset=0.0, video_id=vid, title=info.get("title") or "",
                  description=info.get("description") or "", chapters=info.get("chapters") or [],
-                 heatmap=info.get("heatmap") or [], chat_times=chat_times, source=source, **pr)
+                 heatmap=info.get("heatmap") or [], chat_times=chat_times, chat_funny=chat_funny, source=source, **pr)
 
 
 SECTION_TRIES = 3

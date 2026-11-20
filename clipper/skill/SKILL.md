@@ -26,7 +26,10 @@ If those tools are missing, tell the user the clipper MCP server isn't registere
 ## Workflow
 1. **Start.** Call `start_clip_job(url, n, scan=true, window, min_score=4, niche=<topic if clear, e.g. "gta6">)`.
    **Use exactly the number of clips and clip length the user asked for** (e.g. "6 clips of 45 seconds" -> `n=6, window=45`);
-   only when they say nothing use the defaults `n=12, window=40`. Never replace a number the user gave.
+   only when they say nothing use the defaults `n=12, window=40`. Never replace a number the user gave, and never cap
+   it yourself: `n` can be up to 40 (a bigger number just takes longer to judge).
+   Repeat runs on the same stream skip moments that were already clipped, so each run brings NEW clips; pass
+   `allow_repeats=true` only if the user asks to redo or include the old ones.
    For one short video (under ~10 min) use `scan=false, n=3, window=55`. Layout (facecam/gameplay crop) comes from the
    server's defaults; only pass `facecam`/`gameplay` if the user gives numbers. Optional: `transcribe=true` (reads speech;
    needs faster-whisper on the user's PC). Tell the user it is running: a 9-hour stream can take an hour or more.
@@ -44,6 +47,11 @@ If those tools are missing, tell the user the clipper MCP server isn't registere
    - Score 1-3 and say why for: NO SIGNAL / pause menus / loading or settings screens / black or frozen pictures / nothing
      happening / adult or sexual content (not postable) / anything you can't make sense of. Real action, reactions, funny or
      dramatic moments score higher. `risk_flags` only from spoilers, cutscenes, copyright, profanity.
+   - **Funny and cringe content counts.** A joke that lands, an awkward or cringe moment, an embarrassing fail, a funny
+     reaction, a ridiculous situation: score it 7+ when the setup AND the payoff are both inside the window and a
+     viewer with no context would get it. The chat laughing is a hint, not proof (`signals` includes `chat_funny`):
+     judge from the frames and any transcript. Describe what happens in the `title` ("He tries to ... and instead ...");
+     say what is funny without insulting or mocking real people, and don't invent a punchline you can't see.
    If `job_status` later lists `problems_with_previous_submission`, fix those entries and resubmit just them.
 4. **Present.** When `done`: `list_clips(job_id)`, then `open_review(job_id)` (opens the playable review page in the user's
    browser) and `get_clip_preview` for the best 3-4 clips so the user sees how they look. Summarise per clip: file, time in

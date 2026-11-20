@@ -42,20 +42,21 @@ def _err(e: ClipperError) -> dict:
 def start_clip_job(url: str, n: int = 3, niche: str | None = None, range: str | None = None,
                    window: float = 55.0, fill: bool = False, captions: bool = False, scan: bool = False,
                    transcribe: bool = False, facecam: str | None = None, gameplay: str | None = None,
-                   min_score: float = 0.0, preset: str | None = None) -> dict:
+                   min_score: float = 0.0, preset: str | None = None, allow_repeats: bool = False) -> dict:
     """Start a background clipping job for a video URL (or local file path). Returns a job_id immediately.
 
-    n: clips wanted (1-10). niche: topic like "gta6" (steers hooks/hashtags). range: "START-END" seconds, to analyse
+    n: clips wanted (1-40; use what the user asked for). niche: topic like "gta6" (steers hooks/hashtags). range: "START-END" seconds, to analyse
     only part of a long stream. fill: crop to fill 9:16 instead of blurred bars. captions: burn in speech captions.
-    scan: analyse the WHOLE stream (audio, chat replay, most-replayed) and cut the best n moments (use n=10-15);
+    scan: analyse the WHOLE stream (audio, chat replay, most-replayed) and cut the best n moments, spread over the whole stream;
     transcribe: also read candidates' speech for reactions (needs faster-whisper).
     facecam/gameplay: "x,y,w,h" fractions of the frame for the split layout (defaults come from CLIPPER_FACECAM /
-    CLIPPER_GAMEPLAY). preset: name of a saved facecam/gameplay crop for a streamer (see clipper --save-preset). min_score: leave out candidates you scored below this (e.g. 4).
+    CLIPPER_GAMEPLAY). preset: name of a saved facecam/gameplay crop for a streamer (see clipper --save-preset). min_score: leave out candidates you scored below this (e.g. 4). allow_repeats: by default moments already clipped
+    from this stream in an earlier job are skipped so every run brings new clips; set true to include them again.
     Only use for streams the user has the streamer's written permission to clip. Live (unfinished) streams fail.
     """
     try:
         job = jobs.create(url, n=n, niche=niche, window=window, rng=range, fill=fill, captions=captions, judge="chat",
-                          scan=scan, transcribe=transcribe, facecam=facecam, gameplay=gameplay, min_score=min_score, preset=preset)
+                          scan=scan, transcribe=transcribe, facecam=facecam, gameplay=gameplay, min_score=min_score, preset=preset, allow_repeats=allow_repeats)
         jobs.launch(job)
     except ClipperError as e:
         return _err(e)

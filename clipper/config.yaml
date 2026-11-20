@@ -9,6 +9,7 @@ weights:
   motion: 1.0
   heatmap: 1.5
   chat: 1.5
+  chat_funny: 1.5      # chat spamming laughs / cringe / "clip it" (needs the chat replay)
 
 candidates:
   count: 15            # greedy non-overlapping windows kept

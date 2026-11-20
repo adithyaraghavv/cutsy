@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 
 from . import candidates as cand
+from . import ledger
 from . import captions as cap_mod, evidence, ingest, judge as judge_mod, qa as qa_mod, report, review, signals
 from . import scan as scan_mod
 from . import trends as trends_mod
@@ -113,6 +114,10 @@ def _live_moments(source, media, cands, n, cfg, log) -> list:
     if not valid and failed:
         raise ClipperError("None of the chosen moments could be downloaded (YouTube kept refusing the links). "
                            "Try again later, or use --range on a shorter part of the stream.")
+    if not valid:
+        raise ClipperError("No new moments with a live picture are left in this stream: the rest were dead screens or "
+                           "were already clipped earlier. Use --allow-repeats to include earlier clips, or try another "
+                           "stream or --range.")
     return valid
 
 
@@ -128,7 +133,7 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         judge_name: str = "heuristic", judgments: str | None = None, shortlist: int | None = None,
         niche: str | None = None, trends_path: str | None = None, qa_name: str = "heuristic",
         captions: bool = False, chat: bool = True, scan: bool = False, transcribe: bool = False,
-        min_score: float = 0.0, log=print) -> dict:
+        min_score: float = 0.0, allow_repeats: bool = False, log=print) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     if captions or (scan and transcribe):
         cap_mod.check_available()
@@ -147,7 +152,8 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         trends = state["trends"]
         log(f"Reusing analysis from {out}/state.json ({len(cands)} candidates)")
     else:
-        extras = [k for k, ok in (("heatmap", media.heatmap), ("chat", media.chat_times)) if ok]
+        extras = [k for k, ok in (("heatmap", media.heatmap), ("chat", media.chat_times),
+                                  ("funny chat", getattr(media, "chat_funny", None))) if ok]
         log(f"Extra signals: {', '.join(extras) or 'none'}")
         sig = signals.analyze(media, cfg, rng)
         log(f"Analysed {sig.n * signals.BIN:.0f}s: {', '.join(sig.raw)}")
@@ -156,6 +162,14 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
         else:
             cands = cand.pick(sig, window, cfg)
         trends = trends_mod.load(niche, trends_path, log)
+        if ingest.is_url(source) and not allow_repeats:
+            cands, skipped = ledger.drop_used(cands, cfg, media.video_id)
+            if skipped:
+                log(f"Skipping {skipped} moment(s) already cut into clips from this stream earlier "
+                    "(use --allow-repeats to include them).")
+            if not cands:
+                raise ClipperError("Every good moment found in this stream was already clipped earlier. "
+                                   "Use --allow-repeats to clip them again, or try a different stream or --range.")
 
     sec: dict = {}
     if scan:
@@ -259,6 +273,8 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
            "not_selected": [{"id": it.id, "score": results[it.id].score, "start_s": results[it.id].best_start,
                              "end_s": results[it.id].best_end, "reason": results[it.id].reason} for it in rest]}
     _finish(out, res)
+    if ingest.is_url(source):
+        ledger.record(cfg, media.video_id, [(c["start_s"], c["end_s"]) for c in clips])
     res["status"] = "done"
     if qa_name == "chat":
         p = qa_mod.write_chat_pack(clips, out, hook_s)

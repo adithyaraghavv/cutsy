@@ -20,6 +20,7 @@ HYPE = {
     "no way": 3, "oh my god": 3, "omg": 3, "what the": 3, "wtf": 3, "unbelievable": 3, "are you kidding": 3,
     "oh no": 2, "let's go": 2, "lets go": 2, "holy": 2, "insane": 2, "crazy": 2, "that's so": 1,
     "haha": 2, "hahaha": 2, "lol": 2, "laughing": 2, "dead": 1, "bro": 1, "dude": 1, "yo": 1, "damn": 1,
+    "that's hilarious": 2, "so funny": 2, "i'm dying": 2, "cringe": 2, "awkward": 2, "why would": 1, "bruh": 1,
     "what is": 1, "look at": 1, "wait": 1, "scary": 1, "screaming": 1, "i can't": 2, "i cant": 2,
 }
 
@@ -157,7 +158,7 @@ def find_moments(media, sig, window: float, n: int, cfg: dict, transcribe: bool,
         for b in range(nb):
             cands += cand.pick(slice_signals(sig, b * sig.n // nb, (b + 1) * sig.n // nb), window, cfg, count=per)
     else:
-        cands = cand.pick(sig, window, cfg, count=min(max(3 * n, n + 10), 60))
+        cands = cand.pick(sig, window, cfg, count=min(max(3 * n, n + 10), 150))
     cands = cand.recenter(cands, sig, window, cfg)
     log(f"Scan: {len(cands)} candidate moments found across {span / 3600:.1f} h; signals used: {', '.join(sig.raw)}")
     if transcribe:

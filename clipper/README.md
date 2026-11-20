@@ -93,6 +93,17 @@ scores under 40% of the overall best is only used if nothing better is left). Th
 landed (`first picks at 0.3h, 2.1h, ...`). Set `scan.bucket_s: 0` in `config.yaml` to go back to a plain top-N.
 If everything still lands early, check that the job was not started with a `--range`.
 
+**Funny and cringe moments.** With the chat replay, clipper also reads the chat *text* and scores moments where chat is
+spamming laughs or cringe (`LUL`, `KEKW`, `lol`, skull/crying-laughing emoji, `cringe`, `clip it`, ...) as its own signal
+(`chat_funny`, weight in `config.yaml`). Reaction phrases in speech (`--transcribe`) count too, and the Claude judge is told
+to score a joke that lands, an awkward moment or a funny fail highly. Chat messages are only used to find *where* chat
+reacted; they are not stored or shown.
+
+**More clips, no repeats.** `--n` is not capped (the chat tools allow up to 40). Every stream remembers which moments were
+already cut into clips (`<cache>/<video id>/used_moments.json`, time ranges only), so running the same stream again brings
+new moments. Add `--allow-repeats` to include the old ones. Clips already made in earlier job folders are picked up
+automatically the first time.
+
 ## Phase 2: judge, trends, QA, report (no paid API)
 
 Judging is a swappable backend (`--judge`), so a paid or local model can be added later without touching

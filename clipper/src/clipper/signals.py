@@ -152,6 +152,9 @@ def analyze(media: Media, cfg: dict, span: tuple[float, float] | None = None) ->
     ch = chat_signal(media.chat_times, abs0, n, int(sc["chat_baseline_s"] / BIN))
     if ch is not None:
         raw["chat"] = ch
+    cf = chat_signal(getattr(media, "chat_funny", None) or [], abs0, n, int(sc["chat_baseline_s"] / BIN))
+    if cf is not None:
+        raw["chat_funny"] = cf        # chat spamming laughs / "cringe" / "clip it": funny and awkward moments
 
     z = {k: np.clip(zscore(v), -4.0, 5.0) for k, v in raw.items()}   # one huge spike must not dominate
     w = cfg["weights"]

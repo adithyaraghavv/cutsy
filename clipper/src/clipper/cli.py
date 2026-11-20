@@ -47,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --scan: transcribe candidates to find reactions and write titles from speech (needs faster-whisper)")
     p.add_argument("--min-score", type=float, default=0.0,
                    help="leave out candidates the judge scored below this (1-10); e.g. 4 drops pause menus and dead scenes")
+    p.add_argument("--allow-repeats", action="store_true",
+                   help="include moments already cut into clips from this stream in an earlier run (default: skip them)")
     p.add_argument("--no-chat", action="store_true", help="skip downloading the live-chat replay (much faster for very long streams)")
     p.add_argument("--layout", choices=["blur", "split"], default=None,
                    help="blur: footage centred on a blurred background (default). split: facecam on top, gameplay below (needs --facecam)")
@@ -130,7 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         res = pipeline.run(args.source, n=args.n, window=args.window, rng=rng, fill=args.fill, out=out,
                            cfg=cfg, judge_name=args.judge, judgments=args.judgments, shortlist=args.shortlist,
                            niche=args.niche, trends_path=args.trends, qa_name=args.qa, captions=args.captions, chat=not args.no_chat,
-                           scan=args.scan, transcribe=args.transcribe, min_score=args.min_score)
+                           scan=args.scan, transcribe=args.transcribe, min_score=args.min_score,
+                           allow_repeats=args.allow_repeats)
         if args.upload and res.get("status") == "done":
             from . import uploader
             uploader.run_uploads(res, out, ["youtube", "instagram"] if args.upload == "both" else [args.upload],

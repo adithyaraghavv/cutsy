@@ -7,7 +7,7 @@ from . import minyaml
 from .errors import ClipperError
 
 DEFAULTS: dict = {
-    "weights": {"audio_rms": 1.0, "audio_rise": 1.0, "motion": 1.0, "heatmap": 1.5, "chat": 1.5},
+    "weights": {"audio_rms": 1.0, "audio_rise": 1.0, "motion": 1.0, "heatmap": 1.5, "chat": 1.5, "chat_funny": 1.5},
     "candidates": {"count": 15, "top_fraction": 0.2, "mean_weight": 0.5, "stride_s": 1.0},
     "signals": {"rise_lookback_s": 4.0, "chat_baseline_s": 30.0},
     "render": {
