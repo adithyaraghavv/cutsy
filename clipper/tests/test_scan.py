@@ -23,7 +23,7 @@ def fake_ytdlp(monkeypatch, src_video, calls, live=False):
     """Pretend to be yt-dlp using a local video: metadata, audio-only, section cuts and a chat replay."""
     info = {"id": "vidtest", "title": "9 HOUR STREAM", "is_live": live, "chapters": [], "heatmap": []}
 
-    def run(args, check=True, show=False):
+    def run(args, check=True, show=False, timeout=None):
         calls.append(list(args))
         if "-J" in args:
             return subprocess.CompletedProcess(args, 0, json.dumps(info), "")
@@ -243,11 +243,11 @@ def test_failed_section_is_retried_then_succeeds(landscape, tmp_path, cfg2, monk
     fake_ytdlp(monkeypatch, landscape, calls)
     real = ingest._run_ytdlp
 
-    def flaky(args, check=True, show=False):
+    def flaky(args, check=True, show=False, timeout=None):
         if "--download-sections" in args and boom["n"] < 2:
             boom["n"] += 1
             raise subprocess.CalledProcessError(1, args)
-        return real(args, check=check, show=show)
+        return real(args, check=check, show=show, timeout=timeout)
     monkeypatch.setattr(ingest, "_run_ytdlp", flaky)
     logs = []
     m = ingest.download_section("https://www.youtube.com/watch?v=vidtest", "vidtest", 30, 42, cfg2, logs.append,
@@ -261,14 +261,14 @@ def _failing_sections(monkeypatch, landscape, which):
     fake_ytdlp(monkeypatch, landscape, calls)
     real, seen = ingest._run_ytdlp, []
 
-    def run(args, check=True, show=False):
+    def run(args, check=True, show=False, timeout=None):
         if "--download-sections" in args:
             sec = args[args.index("--download-sections") + 1]
             if sec not in seen:
                 seen.append(sec)
             if which is None or seen.index(sec) in which:
                 raise subprocess.CalledProcessError(1, args)
-        return real(args, check=check, show=show)
+        return real(args, check=check, show=show, timeout=timeout)
     monkeypatch.setattr(ingest, "_run_ytdlp", run)
     monkeypatch.setattr(ingest.time, "sleep", lambda s: None)
 
@@ -443,3 +443,48 @@ def test_clip_count_is_not_capped_at_ten(tmp_path, monkeypatch):
     assert jobs.create(str(f), n=30)["params"]["n"] == 30
     with pytest.raises(Exception, match="between 1 and 40"):
         jobs.create(str(f), n=41)
+
+
+def test_chat_download_that_takes_too_long_is_abandoned(landscape, tmp_path, cfg2, monkeypatch):
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    real = ingest._run_ytdlp
+
+    def slow_chat(args, check=True, show=False, timeout=None):
+        if "--write-subs" in args:
+            assert timeout == 2700 or timeout == 1                  # the limit is passed to yt-dlp
+            raise subprocess.TimeoutExpired(args, timeout)
+        return real(args, check=check, show=show, timeout=timeout)
+    monkeypatch.setattr(ingest, "_run_ytdlp", slow_chat)
+    logs = []
+    r = pipeline.run("https://www.youtube.com/watch?v=vidtest", n=1, window=12, rng=None, fill=False,
+                     out=tmp_path / "o", cfg=cfg2, scan=True, log=logs.append)
+    assert len(r["clips"]) == 1 and any("taking too long" in l for l in logs)
+    assert (Path(cfg2["cache_dir"]) / "vidtest" / "chat.skipped").is_file()
+    n_chat = sum("--write-subs" in c for c in calls)
+    pipeline.run("https://www.youtube.com/watch?v=vidtest", n=1, window=12, rng=None, fill=False,
+                 out=tmp_path / "o2", cfg=cfg2, scan=True, allow_repeats=True, log=logs.append)
+    assert sum("--write-subs" in c for c in calls) == n_chat         # not retried on the next run
+    assert any("Skipping the chat replay" in l for l in logs)
+
+
+def test_resuming_does_not_fetch_chat_again(landscape, tmp_path, cfg2, monkeypatch):
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    url = "https://www.youtube.com/watch?v=vidtest"
+    out = tmp_path / "o"
+    r = pipeline.run(url, n=1, window=12, rng=None, fill=False, out=out, cfg=cfg2, scan=True, judge_name="chat", log=QUIET)
+    assert r["status"] == "awaiting_judgments"
+    for f in (Path(cfg2["cache_dir"]) / "vidtest").glob("chat*"):      # as if the cache were somewhere else
+        f.unlink()
+    before = sum("--write-subs" in c for c in calls)
+    logs = []
+    pipeline.run(url, n=1, window=12, rng=None, fill=False, out=out, cfg=cfg2, scan=True, judge_name="chat", log=logs.append)
+    assert sum("--write-subs" in c for c in calls) == before and any("not fetching the chat replay again" in l for l in logs)
+
+
+def test_resume_command_keeps_the_cache_dir_and_cli_accepts_it(tmp_path, cfg2):
+    cmd = pipeline._resume_cmd("https://youtu.be/x", 3, 40.0, None, False, None, tmp_path / "o", "chat", True, False,
+                               False, True, cfg2, 0.0)
+    assert "--cache-dir" in cmd
+    assert cli.build_parser().parse_args(["x", "--cache-dir", "/tmp/c"]).cache_dir == "/tmp/c"

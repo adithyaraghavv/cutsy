@@ -117,12 +117,12 @@ def _ytdlp() -> str:
     return p
 
 
-def _run_ytdlp(args: list[str], *, check=True, show=False) -> subprocess.CompletedProcess:
+def _run_ytdlp(args: list[str], *, check=True, show=False, timeout=None) -> subprocess.CompletedProcess:
     """Single seam for tests: all yt-dlp subprocess calls go through here.
     show=True lets yt-dlp print its own progress to the terminal (used for long downloads)."""
     if show:
-        return subprocess.run([_ytdlp(), *args], text=True, check=check)
-    return subprocess.run([_ytdlp(), *args], capture_output=True, text=True, check=check)
+        return subprocess.run([_ytdlp(), *args], text=True, check=check, timeout=timeout)
+    return subprocess.run([_ytdlp(), *args], capture_output=True, text=True, check=check, timeout=timeout)
 
 
 def check_not_live(info: dict) -> None:
@@ -232,7 +232,7 @@ def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
         if not target.is_file():
             raise ClipperError("Download finished but the video file wasn't found in the cache.")
 
-    chat_times = _get_chat(d, url, log, chat)
+    chat_times = _get_chat(d, url, log, chat, _chat_timeout(cfg))
     chat_funny = _get_chat_funny(d)
 
     pr = probe(target)
@@ -244,18 +244,36 @@ def _resolve_url(url: str, rng, cfg: dict, log, chat: bool) -> Media:
     )
 
 
-def _get_chat(d: Path, url: str, log, chat: bool) -> list[float]:
-    """Live-chat replay message times (seconds), cached; soft-fails to []."""
+def _get_chat(d: Path, url: str, log, chat: bool, timeout_s: float | None = None) -> list[float]:
+    """Live-chat replay message times (seconds), cached; soft-fails to [].
+    A very long stream can have hours of chat. After `timeout_s` the download is abandoned (the scan then uses
+    audio, motion and the replay heatmap only) and a marker is left so reruns don't wait that long again."""
     chat_file = next(d.glob("chat*.live_chat.json"), None)
+    marker = d / "chat.skipped"
+    if chat_file is None and chat and marker.is_file():
+        log("Skipping the chat replay: it took too long on an earlier run (delete chat.skipped in the cache folder to retry).")
+        chat = False
     if chat_file is None and chat:
-        log("Fetching chat replay (skip with --no-chat; can take several minutes for very long streams)...")
+        log("Fetching chat replay (skip with --no-chat; can take several minutes for very long streams"
+            + (f", gives up after {timeout_s / 60:.0f} min" if timeout_s else "") + ")...")
+        kw = {"timeout": timeout_s} if timeout_s else {}
         try:
             _run_ytdlp(["--skip-download", "--write-subs", "--sub-langs", "live_chat",
-                        "--no-playlist", "-o", str(d / "chat"), url], check=False)
+                        "--no-playlist", "-o", str(d / "chat"), url], check=False, **kw)
+        except subprocess.TimeoutExpired:
+            log("The chat replay is taking too long; carrying on without it.")
+            for part in d.glob("chat*"):          # drop the half-written file, then leave the marker
+                part.unlink(missing_ok=True)
+            marker.write_text("timeout", encoding="utf-8")
         except ClipperError:
             pass
         chat_file = next(d.glob("chat*.live_chat.json"), None)
     return parse_chat(chat_file) if chat_file else []
+
+
+def _chat_timeout(cfg: dict) -> float | None:
+    t = float((cfg.get("scan") or {}).get("chat_timeout_s", 0) or 0)
+    return t if t > 0 else None
 
 
 def _get_chat_funny(d: Path) -> list[float]:
@@ -291,7 +309,7 @@ def resolve_scan(source: str, cfg: dict, log, chat: bool = True) -> Media:
         audio = next((p for p in d.glob("audio.*") if p.suffix not in (".part", ".ytdl", ".json")), None)
         if audio is None:
             raise ClipperError("Audio download finished but the file wasn't found in the cache.")
-    chat_times = _get_chat(d, source, log, chat)
+    chat_times = _get_chat(d, source, log, chat, _chat_timeout(cfg))
     chat_funny = _get_chat_funny(d)
     pr = probe(audio, need_video=False)
     return Media(path=audio, offset=0.0, video_id=vid, title=info.get("title") or "",

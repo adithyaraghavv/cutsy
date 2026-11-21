@@ -19,7 +19,7 @@ DEFAULTS: dict = {
     },
     "captions": {"model": "base.en", "language": "en", "chunk_words": 2, "fontsize": 96,
                  "margin_v": 430, "highlight_bgr": "00D7FF"},
-    "scan": {"min_gap_s": 180, "min_motion": 0.25, "bucket_s": 900},
+    "scan": {"min_gap_s": 180, "min_motion": 0.25, "bucket_s": 900, "chat_timeout_s": 2700},
     "cache_dir": ".clipper-cache",
 }
 

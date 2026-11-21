@@ -47,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --scan: transcribe candidates to find reactions and write titles from speech (needs faster-whisper)")
     p.add_argument("--min-score", type=float, default=0.0,
                    help="leave out candidates the judge scored below this (1-10); e.g. 4 drops pause menus and dead scenes")
+    p.add_argument("--cache-dir", default=None, metavar="DIR",
+                   help="folder for downloads and caches (a resumed job needs the same one to reuse its downloads)")
     p.add_argument("--allow-repeats", action="store_true",
                    help="include moments already cut into clips from this stream in an earlier run (default: skip them)")
     p.add_argument("--no-chat", action="store_true", help="skip downloading the live-chat replay (much faster for very long streams)")
@@ -95,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.budget_usd <= 0:
             raise ClipperError("--budget-usd must be greater than 0.")
         cfg = config.load(args.config)
+        if args.cache_dir:
+            cfg["cache_dir"] = args.cache_dir
         if args.facecam:
             try:
                 cfg["render"]["facecam"] = [float(v) for v in args.facecam.split(",")]
@@ -147,3 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         print("clipper: interrupted", file=sys.stderr)
         return 130
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

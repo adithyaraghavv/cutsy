@@ -59,6 +59,10 @@ def _resume_cmd(source, n, window, rng, fill, niche, out, judge_name, scan=False
         parts += ["--facecam", ",".join(f"{v:g}" for v in r["facecam"])]
         if r.get("gameplay"):
             parts += ["--gameplay", ",".join(f"{v:g}" for v in r["gameplay"])]
+    from .config import DEFAULTS
+    cd = (cfg or {}).get("cache_dir")
+    if cd and cd != DEFAULTS["cache_dir"]:
+        parts += ["--cache-dir", shlex.quote(str(cd))]       # same downloads as the job that printed this command
     parts += ["--judge", judge_name, "--judgments", shlex.quote(str(Path(out) / "judgments.json")), "--out", shlex.quote(str(out))]
     return " ".join(parts)
 
@@ -137,6 +141,11 @@ def run(source: str, *, n: int, window: float, rng, fill: bool, out: Path, cfg: 
     out.mkdir(parents=True, exist_ok=True)
     if captions or (scan and transcribe):
         cap_mod.check_available()
+    st0 = _load_state(out)
+    if scan and chat and st0 and st0.get("source") == source and st0.get("scan") and st0.get("window") == window \
+            and st0.get("range") == (list(rng) if rng else None) and st0.get("candidates"):
+        chat = False        # resuming: the moments are already chosen, the chat replay is only needed to choose them
+        log("Resuming from the saved analysis: not fetching the chat replay again.")
     media = ingest.resolve_scan(source, cfg, log, chat) if scan else ingest.resolve(source, rng, cfg, log=log, chat=chat)
     log(f"Source: {media.title or media.source}  ({media.duration:.0f}s, "
         f"{(str(media.width) + 'x' + str(media.height)) if media.width else 'audio only'}"
