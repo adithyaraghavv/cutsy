@@ -72,6 +72,23 @@ def _scrub(text: str, secrets_: list[str]) -> str:
     return text
 
 
+class UploadLimitError(ClipperError):
+    """YouTube refused the upload because the channel hit its daily upload limit."""
+
+
+from .upload_limit import hours_left as limit_hours_left, mark_hit as mark_limit_hit  # noqa: E402
+
+
+def _is_limit(err: str, body) -> bool:
+    low = err.lower()
+    if "exceeded the number of videos" in low or "uploadlimitexceeded" in low:
+        return True
+    try:
+        return any(x.get("reason") == "uploadLimitExceeded" for x in body["error"].get("errors", []))
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
 def _check(status: int, body: dict | None, what: str, secrets_: list[str]) -> dict:
     if 200 <= status < 300:
         return body or {}
@@ -79,6 +96,10 @@ def _check(status: int, body: dict | None, what: str, secrets_: list[str]) -> di
     if isinstance(body, dict):
         e = body.get("error")
         err = e.get("message", "") if isinstance(e, dict) else str(e or body.get("error_description", ""))
+    if _is_limit(err, body):
+        mark_limit_hit()
+        raise UploadLimitError("YouTube's daily upload limit for this channel was reached. Wait about a day, then upload "
+                               "the rest a few at a time (verifying the channel's phone number in YouTube Studio raises it).")
     raise ClipperError(_scrub(f"{what} failed (HTTP {status}): {err or 'no details'}", secrets_))
 
 
@@ -221,7 +242,11 @@ def yt_metadata(clip: dict, privacy: str) -> dict:
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False}}
 
 
-def youtube_upload(path: Path, clip: dict, privacy: str, log, interactive: bool = True) -> str:
+def youtube_upload(path: Path, clip: dict, privacy: str, log, interactive: bool = True, ignore_limit: bool = False) -> str:
+    left = limit_hours_left()
+    if left and not ignore_limit:
+        raise UploadLimitError(f"YouTube's upload limit was hit recently; try again in about {left:.1f} h "
+                               "(no request was sent, so nothing was uploaded).")
     token = yt_access_token(log, interactive)
     size = path.stat().st_size
     meta = json.dumps(yt_metadata(clip, privacy)).encode()

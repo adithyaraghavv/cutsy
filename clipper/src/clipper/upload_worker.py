@@ -11,7 +11,7 @@ from . import jobs, uploader
 from .errors import ClipperError
 
 
-def run(job_dir, clip: str, platform: str, privacy: str, log=print) -> dict:
+def run(job_dir, clip: str, platform: str, privacy: str, log=print, ignore_limit: bool = False) -> dict:
     d = Path(job_dir)
     jid = d.name
     res = jobs.clips_of(jid)
@@ -22,7 +22,7 @@ def run(job_dir, clip: str, platform: str, privacy: str, log=print) -> dict:
     path = d / "out" / clip
     try:
         if platform == "youtube":
-            vid = uploader.youtube_upload(path, c, privacy, log, interactive=False)
+            vid = uploader.youtube_upload(path, c, privacy, log, interactive=False, ignore_limit=ignore_limit)
             return jobs.set_upload(jid, clip, platform, status="done", id=vid, url=f"https://youtu.be/{vid}" if vid else "")
         if platform == "instagram":
             mid = uploader.instagram_upload(path, c, log)
@@ -38,7 +38,7 @@ def run(job_dir, clip: str, platform: str, privacy: str, log=print) -> dict:
 
 def main(argv=None) -> int:
     a = argv or sys.argv[1:]
-    run(a[0], a[1], a[2], a[3])
+    run(a[0], a[1], a[2], a[3], ignore_limit="--ignore-limit" in a[4:])
     return 0
 
 

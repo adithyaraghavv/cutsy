@@ -239,17 +239,26 @@ def approve_clip(job_id: str, clip: str) -> dict:
 
 
 @server.tool()
-def upload_clip(job_id: str, clip: str, platform: str = "youtube", privacy: str = "private") -> dict:
+def upload_clip(job_id: str, clip: str, platform: str = "youtube", privacy: str = "private",
+                retry_after_limit: bool = False) -> dict:
     """Upload a clip the USER has approved (approve_clip first). Runs in the background; check job_status 'uploads'.
 
     Only call this after the user explicitly asked to post THIS clip to THIS platform. privacy: private (default) |
     unlisted | public; use public only if the user said so. YouTube needs the one-time sign-in `clipper --auth youtube`.
-    Each clip is uploaded at most once per platform."""
+    Each clip is uploaded at most once per platform. If YouTube's daily upload limit was hit recently this refuses
+    (nothing is queued) and says how many hours to wait; pass retry_after_limit=true only if the user says the limit reset."""
     try:
         if platform not in ("youtube", "instagram"):
             return {"error": "platform must be 'youtube' or 'instagram'."}
         if privacy not in ("private", "unlisted", "public"):
             return {"error": "privacy must be private, unlisted or public."}
+        if platform == "youtube" and not retry_after_limit:
+            from . import upload_limit
+            left = upload_limit.hours_left()
+            if left:
+                return {"error": f"YouTube's daily upload limit was hit recently. Try again in about {left:.1f} hours "
+                                 "(or pass retry_after_limit=true if the user says it has reset). Nothing was queued.",
+                        "retry_after_hours": round(left, 1)}
         job = jobs.refresh(job_id)
         res = jobs.clips_of(job_id)
         names = [c["file"] for c in (res or {}).get("clips", [])]
@@ -263,7 +272,7 @@ def upload_clip(job_id: str, clip: str, platform: str = "youtube", privacy: str 
             return {"already": prev, "note": "This clip is already uploaded or uploading to that platform."}
         jobs.set_upload(job_id, clip, platform, status="queued", privacy=privacy,
                         approved_at=job["approvals"][clip], queued=time.time(), error="")
-        jobs.launch_upload(job_id, clip, platform, privacy)
+        jobs.launch_upload(job_id, clip, platform, privacy, **({"ignore_limit": True} if retry_after_limit else {}))
     except ClipperError as e:
         return _err(e)
     return {"status": "queued", "clip": clip, "platform": platform, "privacy": privacy,

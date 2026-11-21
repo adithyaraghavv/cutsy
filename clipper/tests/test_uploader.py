@@ -205,3 +205,39 @@ def test_no_default_upload(landscape, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert cli.main([str(landscape), "--window", "12", "--n", "1", "--out", "o"]) == 0
     assert called == []
+
+
+def test_upload_limit_error_is_recognised_and_blocks_further_attempts(env, clips, monkeypatch):
+    res, out = clips
+    sent = []
+
+    def net(method, url, *, headers=None, data=None, timeout=0):
+        sent.append(url)
+        if url == "https://oauth2.googleapis.com/token":
+            return 200, {}, {"access_token": "ACCESS-TOKEN-1"}
+        if url.startswith(uploader.YT_UPLOAD):
+            return 400, {}, {"error": {"message": "The user has exceeded the number of videos they may upload.",
+                                         "errors": [{"reason": "uploadLimitExceeded"}]}}
+        return 404, {}, {}
+    monkeypatch.setattr(uploader, "_http", net)
+    with pytest.raises(uploader.UploadLimitError, match="daily upload limit"):
+        uploader.youtube_upload(out / "clip_1.mp4", res["clips"][0], "private", lambda *_: None, interactive=False)
+    assert uploader.limit_hours_left() > 5
+    n = len(sent)
+    with pytest.raises(uploader.UploadLimitError, match="nothing was uploaded"):
+        uploader.youtube_upload(out / "clip_2.mp4", res["clips"][1], "private", lambda *_: None, interactive=False)
+    assert len(sent) == n                                            # no network call while the cooldown is on
+    # the user says it has reset: ignore_limit lets one attempt through again
+    monkeypatch.setattr(uploader, "_http", FakeNet())
+    vid = uploader.youtube_upload(out / "clip_2.mp4", res["clips"][1], "private", lambda *_: None, interactive=False,
+                                  ignore_limit=True)
+    assert vid == "YT_VIDEO_ID"
+
+
+def test_upload_clip_tool_refuses_while_the_limit_cooldown_is_on(env, monkeypatch, tmp_path):
+    from clipper import mcp_server
+    from clipper import upload_limit
+    upload_limit.mark_hit()
+    monkeypatch.setenv("CLIPPER_JOBS_DIR", str(tmp_path / "jobs"))
+    r = mcp_server.upload_clip("nojob", "clip_1.mp4")
+    assert "daily upload limit" in r["error"] and r["retry_after_hours"] > 5

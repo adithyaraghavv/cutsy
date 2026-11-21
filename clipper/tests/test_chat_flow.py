@@ -62,7 +62,7 @@ def test_upload_requires_approval_and_defaults_to_private(done_job, jobs_env, mo
     net = FakeNet()
     monkeypatch.setattr(uploader, "_http", net)
     ran = []
-    monkeypatch.setattr(jobs, "launch_upload", lambda jid, c, p, pr: ran.append(upload_worker.run(jobs.job_path(jid), c, p, pr, log=lambda *_: None)))
+    monkeypatch.setattr(jobs, "launch_upload", lambda jid, c, p, pr, **kw: ran.append(upload_worker.run(jobs.job_path(jid), c, p, pr, log=lambda *_: None)))
     # 1) not approved -> nothing happens
     assert "not been approved" in mcp_server.upload_clip(done_job, clip)["error"]
     assert ran == [] and net.calls == []

@@ -134,7 +134,7 @@ def set_upload(job_id: str, clip: str, platform: str, **fields) -> dict:
     return job["uploads"][clip][platform]
 
 
-def launch_upload(job_id: str, clip: str, platform: str, privacy: str) -> None:
+def launch_upload(job_id: str, clip: str, platform: str, privacy: str, ignore_limit: bool = False) -> None:
     """Upload in its own detached process (so a tool call never waits on a big upload)."""
     d = job_path(job_id)
     env = dict(os.environ)
@@ -146,7 +146,8 @@ def launch_upload(job_id: str, clip: str, platform: str, privacy: str) -> None:
     else:
         kw["start_new_session"] = True
     with open(d / "upload_log.txt", "ab") as log:
-        subprocess.Popen([sys.executable, "-m", "clipper.upload_worker", str(d), clip, platform, privacy], cwd=str(d),
+        subprocess.Popen([sys.executable, "-m", "clipper.upload_worker", str(d), clip, platform, privacy,
+                          *(["--ignore-limit"] if ignore_limit else [])], cwd=str(d),
                          env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **kw)
 
 
