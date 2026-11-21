@@ -91,27 +91,54 @@ def _drawn(c: dict) -> str:
 
 
 def _live_moments(source, media, cands, n, cfg, log) -> list:
-    """Walk the candidates best-first, fetch each moment's picture, drop dead screens, keep n live ones."""
+    """Walk the candidates best-first, fetch each moment's picture, drop dead screens, keep n live ones.
+    Moments are downloaded a few at a time (scan.parallel_downloads) because each download mostly waits on the
+    network; they are still judged strictly in best-first order."""
+    from concurrent.futures import ThreadPoolExecutor
     from . import visual
     min_motion = float(cfg.get("scan", {}).get("min_motion", 0.25))
+    par = max(1, int(cfg.get("scan", {}).get("parallel_downloads", 1) or 1)) if ingest.is_url(source) else 1
     valid: list = []
     failed = 0
-    for c in cands:
-        if len(valid) >= n:
-            break
-        log(f"[{len(valid) + 1}/{n}] moment {c.start_s:.0f}-{c.end_s:.0f}s")
+
+    def fetch(c):
+        if not ingest.is_url(source):
+            return media, None
         try:
-            m = ingest.download_section(source, media.video_id, c.start_s, c.end_s, cfg, log) if ingest.is_url(source) else media
+            return ingest.download_section(source, media.video_id, c.start_s, c.end_s, cfg, log), None
         except ClipperError as e:
-            log(f"  skipped: {e}")
-            failed += 1
-            continue
-        info = visual.liveliness(m.path, max(0.0, c.start_s - m.offset), c.end_s - c.start_s)
-        why = visual.dead_reason(info, min_motion)
-        if why:
-            log(f"  skipped: {why}")
-            continue
-        valid.append((c, m))
+            return None, e
+
+    pool = ThreadPoolExecutor(max_workers=par)
+    try:
+        pending: list = []                       # (candidate, future) in best-first order
+        it = iter(cands)
+        exhausted = False
+        while len(valid) < n:
+            limit = min(par, max(1, n - len(valid)))     # no point fetching far more than is still needed
+            while not exhausted and len(pending) < limit:
+                c = next(it, None)
+                if c is None:
+                    exhausted = True
+                    break
+                pending.append((c, pool.submit(fetch, c)))
+            if not pending:
+                break
+            c, fut = pending.pop(0)
+            log(f"[{len(valid) + 1}/{n}] moment {c.start_s:.0f}-{c.end_s:.0f}s")
+            m, err = fut.result()
+            if err is not None:
+                log(f"  skipped: {err}")
+                failed += 1
+                continue
+            info = visual.liveliness(m.path, max(0.0, c.start_s - m.offset), c.end_s - c.start_s)
+            why = visual.dead_reason(info, min_motion)
+            if why:
+                log(f"  skipped: {why}")
+                continue
+            valid.append((c, m))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     if len(valid) < n:
         log(f"Only {len(valid)} live moments were found (asked for {n})."
             + (f" {failed} moment(s) could not be downloaded and were skipped." if failed else ""))

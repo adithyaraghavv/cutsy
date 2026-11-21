@@ -216,7 +216,7 @@ def render_clip(media: Media, start_abs: float, end_abs: float, out_path: Path, 
         cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "0:a:0" if media.has_audio else "1:a:0"]
         if media.has_audio:
             cmd += ["-af", f"loudnorm=I={r['loudness_lufs']}:TP=-1.5:LRA=11"]
-        cmd += ["-c:v", "libx264", "-crf", str(r["crf"]), "-preset", "medium", "-pix_fmt", "yuv420p",
+        cmd += ["-c:v", "libx264", "-crf", str(r["crf"]), "-preset", str(r.get("preset", "veryfast")), "-pix_fmt", "yuv420p",
                 "-r", str(r["fps"]), "-c:a", "aac", "-b:a", str(r["audio_bitrate"]), "-ar", "48000",
                 "-ac", "2", "-movflags", "+faststart", "-t", f"{dur:.3f}", str(out_path)]
         try:

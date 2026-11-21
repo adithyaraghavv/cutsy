@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -299,17 +300,24 @@ def resolve_scan(source: str, cfg: dict, log, chat: bool = True) -> Media:
     info = fetch_info(source)
     check_not_live(info)
     vid, d = _cache_dir(cfg, info, source)
+    # The chat replay (slow on long streams) downloads WHILE the audio does, so the two overlap instead of adding up.
+    pool = ThreadPoolExecutor(max_workers=1)
+    chat_fut = pool.submit(_get_chat, d, source, log, chat, _chat_timeout(cfg)) if chat else None
     audio = next((p for p in d.glob("audio.*") if p.suffix not in (".part", ".ytdl", ".json")), None)
     if audio is None:
-        log("Downloading the audio track of the whole stream for scanning (yt-dlp progress follows)...")
+        log("Downloading the audio track of the whole stream for scanning (the smallest track is enough; "
+            "yt-dlp progress follows)...")
         try:
-            _run_ytdlp(["-f", "ba/b", "--no-playlist", "-o", str(d / "audio.%(ext)s"), source], show=True)
+            # the scan only measures loudness, so the smallest audio track (wa) is plenty and downloads ~2-3x faster
+            _run_ytdlp(["-f", "wa/ba/b", "--no-playlist", "-o", str(d / "audio.%(ext)s"), source], show=True)
         except subprocess.CalledProcessError:
+            pool.shutdown(wait=False, cancel_futures=True)
             raise ClipperError("Audio download failed (see the yt-dlp messages above).") from None
         audio = next((p for p in d.glob("audio.*") if p.suffix not in (".part", ".ytdl", ".json")), None)
         if audio is None:
             raise ClipperError("Audio download finished but the file wasn't found in the cache.")
-    chat_times = _get_chat(d, source, log, chat, _chat_timeout(cfg))
+    chat_times = chat_fut.result() if chat_fut else []
+    pool.shutdown(wait=False)
     chat_funny = _get_chat_funny(d)
     pr = probe(audio, need_video=False)
     return Media(path=audio, offset=0.0, video_id=vid, title=info.get("title") or "",

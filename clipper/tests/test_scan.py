@@ -53,9 +53,9 @@ def test_url_scan_end_to_end(landscape, tmp_path, cfg2, monkeypatch):
                      cfg=cfg2, scan=True, log=QUIET)
     assert r["status"] == "done" and len(r["clips"]) == 2
     # whole stream audio-only first; the picture was fetched ONLY for the 2 chosen moments
-    assert any("ba/b" in a for a in calls)
+    assert any("wa/ba/b" in a for a in calls)             # smallest audio track: only loudness is measured
     sections = [c for c in calls if "--download-sections" in c]
-    assert len(sections) == 2 and not any("--download-sections" in c and "ba/b" in c for c in calls)
+    assert len(sections) == 2 and not any("--download-sections" in c and "wa/ba/b" in c for c in calls)
     top = r["clips"][0]
     overlap = min(top["end_s"], 45) - max(top["start_s"], 30)             # the loud/hyped stretch is 30-45 s
     assert overlap >= 6 and top["start_s"] >= 24 and top["end_s"] <= 48   # starts a little before the payoff
@@ -452,7 +452,7 @@ def test_chat_download_that_takes_too_long_is_abandoned(landscape, tmp_path, cfg
 
     def slow_chat(args, check=True, show=False, timeout=None):
         if "--write-subs" in args:
-            assert timeout == 2700 or timeout == 1                  # the limit is passed to yt-dlp
+            assert timeout == cfg2["scan"]["chat_timeout_s"]       # the configured limit is passed to yt-dlp
             raise subprocess.TimeoutExpired(args, timeout)
         return real(args, check=check, show=show, timeout=timeout)
     monkeypatch.setattr(ingest, "_run_ytdlp", slow_chat)
@@ -488,3 +488,64 @@ def test_resume_command_keeps_the_cache_dir_and_cli_accepts_it(tmp_path, cfg2):
                                False, True, cfg2, 0.0)
     assert "--cache-dir" in cmd
     assert cli.build_parser().parse_args(["x", "--cache-dir", "/tmp/c"]).cache_dir == "/tmp/c"
+
+
+def test_moments_are_downloaded_in_parallel_but_judged_in_order(landscape, tmp_path, cfg2, monkeypatch):
+    import threading, time as _t
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    real = ingest._run_ytdlp
+    live, peak = {"n": 0}, {"n": 0}
+    lock = threading.Lock()
+
+    def slow(args, check=True, show=False, timeout=None):
+        if "--download-sections" in args:
+            with lock:
+                live["n"] += 1
+                peak["n"] = max(peak["n"], live["n"])
+            _t.sleep(0.4)                                          # a download that mostly waits on the network
+            try:
+                return real(args, check=check, show=show, timeout=timeout)
+            finally:
+                with lock:
+                    live["n"] -= 1
+        return real(args, check=check, show=show, timeout=timeout)
+    monkeypatch.setattr(ingest, "_run_ytdlp", slow)
+    cfg2["scan"]["parallel_downloads"] = 3
+    logs = []
+    pipeline.run("https://www.youtube.com/watch?v=vidtest", n=4, window=12, rng=None, fill=False, out=tmp_path / "o",
+                 cfg=cfg2, scan=True, allow_repeats=True, log=logs.append)
+    assert peak["n"] >= 2                                          # overlapped
+    order = [l for l in logs if l.startswith("[") and "moment" in l]
+    assert order and order == sorted(order, key=lambda l: int(l.split("/")[0][1:]))   # progress still counts up in order
+
+
+def test_audio_and_chat_download_overlap_and_audio_is_smallest_track(landscape, tmp_path, cfg2, monkeypatch):
+    import time as _t
+    calls = []
+    fake_ytdlp(monkeypatch, landscape, calls)
+    real = ingest._run_ytdlp
+    span = {}
+
+    def run(args, check=True, show=False, timeout=None):
+        kind = "chat" if "--write-subs" in args else ("audio" if "audio.%(ext)s" in " ".join(args) else None)
+        if kind == "chat":
+            span["chat_start"] = _t.monotonic()
+            _t.sleep(0.8)                                              # a slow chat download
+        elif kind == "audio":
+            span["audio_start"] = _t.monotonic()
+            _t.sleep(0.8)                                              # a slow audio download
+        out = real(args, check=check, show=show, timeout=timeout)
+        if kind:
+            span[kind + "_end"] = _t.monotonic()
+        return out
+    monkeypatch.setattr(ingest, "_run_ytdlp", run)
+    m = ingest.resolve_scan("https://www.youtube.com/watch?v=vidtest", cfg2, QUIET, True)
+    assert m.chat_times
+    assert span["audio_start"] < span["chat_end"] and span["chat_start"] < span["audio_end"]   # they overlapped
+    audio_call = next(c for c in calls if "-f" in c and "audio.%(ext)s" in " ".join(c))
+    assert audio_call[audio_call.index("-f") + 1].startswith("wa")
+
+
+def test_render_uses_the_fast_preset_by_default(cfg):
+    assert cfg["render"]["preset"] == "veryfast"
