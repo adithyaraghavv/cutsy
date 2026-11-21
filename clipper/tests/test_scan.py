@@ -549,3 +549,25 @@ def test_audio_and_chat_download_overlap_and_audio_is_smallest_track(landscape, 
 
 def test_render_uses_the_fast_preset_by_default(cfg):
     assert cfg["render"]["preset"] == "veryfast"
+
+
+def test_cli_prints_emoji_titles_on_a_cp1252_console(landscape, tmp_path, monkeypatch):
+    """The 'red circle' in a stream title used to crash the command line on Windows."""
+    import io, sys
+    raw = io.BytesIO()
+    out = io.TextIOWrapper(raw, encoding="cp1252", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", out)
+    from clipper.console import safe_streams
+    safe_streams()
+    print("\U0001F534 PLAYING GTA 6 RIGHT NOW")                  # would raise UnicodeEncodeError on cp1252
+    out.flush()
+    assert b"PLAYING GTA 6" in raw.getvalue()
+
+
+def test_cli_main_switches_the_console_to_utf8(tmp_path, monkeypatch):
+    from clipper import console
+    seen = []
+    monkeypatch.setattr(console, "safe_streams", lambda: seen.append(1))
+    monkeypatch.setenv("CLIPPER_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert cli.main(["--save-preset", "x", "--facecam", "0,0,0.2,0.2"]) == 0
+    assert seen

@@ -12,12 +12,8 @@ from .errors import ClipperError
 
 
 def _safe_streams() -> None:
-    """Windows consoles use cp1252: a stream title with an emoji must not kill the job when it is logged."""
-    for st in (sys.stdout, sys.stderr):
-        try:
-            st.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError, OSError):
-            pass
+    from .console import safe_streams
+    safe_streams()
 
 
 def main(argv=None) -> int:
